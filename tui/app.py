@@ -606,7 +606,7 @@ class LogScreen(Screen):
         self.store = store
 
     def compose(self) -> ComposeResult:
-        yield RichLog(id="log-view", highlight=True, wrap=True)
+        yield RichLog(id="log-view", markup=True, wrap=True)
 
     def on_mount(self):
         self._refresh()
@@ -617,7 +617,8 @@ class LogScreen(Screen):
         level_colors = {"info": "grey50", "success": "green", "warn": "yellow", "error": "red"}
         for entry in self.store.logs[:200]:
             color = level_colors.get(entry.level, "grey50")
-            log_widget.write(f"[{color}][{entry.action:<8}][/] {entry.message} [grey35]{format_time(entry.timestamp)}[/]")
+            text = Text.from_markup(f"[{color}][{entry.action:<8}][/] {entry.message} [grey35]{format_time(entry.timestamp)}[/]")
+            log_widget.write(text)
 
     def action_switch_tasks(self):
         self.app.switch_to_tasks()
