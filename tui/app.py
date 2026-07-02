@@ -22,6 +22,11 @@ from rich.layout import Layout
 
 from .storage import TaskStore, PRIO_COLORS, STATUS_ICONS, STATUS_CYCLE
 
+_DEBUG_LOG = open("/tmp/plexo-debug.log", "w")
+def _debug(msg: str):
+    _DEBUG_LOG.write(msg + "\n")
+    _DEBUG_LOG.flush()
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # CSS — dark theme, amber accents, round borders
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -432,10 +437,10 @@ class DashboardScreen(Screen):
     def __init__(self, store: TaskStore):
         super().__init__()
         self.store = store
-        print("[DEBUG] DashboardScreen.__init__", file=__import__("sys").stderr)
+        _debug("DashboardScreen.__init__")
 
     def compose(self) -> ComposeResult:
-        print("[DEBUG] DashboardScreen.compose start", file=__import__("sys").stderr)
+        _debug("DashboardScreen.compose start")
         with Horizontal(classes="stats-grid"):
             for label, key, card_class, color in [
                 ("Total", "total", "stat-card-total", "#e4e4e7"),
@@ -461,10 +466,10 @@ class DashboardScreen(Screen):
         with Vertical(classes="dash-section"):
             yield Static("RECENT ACTIVITY", classes="dash-title")
             yield RecentLog(self.store)
-        print("[DEBUG] DashboardScreen.compose end", file=__import__("sys").stderr)
+        _debug("DashboardScreen.compose end")
 
     def on_mount(self):
-        print("[DEBUG] DashboardScreen.on_mount called", file=__import__("sys").stderr)
+        _debug("DashboardScreen.on_mount called")
 
     def action_switch_tasks(self):
         self.app.switch_to_tasks()
@@ -487,10 +492,10 @@ class PriorityChart(Static):
     def __init__(self, store: TaskStore):
         super().__init__()
         self.store = store
-        print("[DEBUG] PriorityChart.__init__", file=__import__("sys").stderr)
+        _debug("PriorityChart.__init__")
 
     def on_mount(self):
-        print("[DEBUG] PriorityChart.on_mount", file=__import__("sys").stderr)
+        _debug("PriorityChart.on_mount")
         self._refresh_chart()
 
     def _refresh_chart(self):
@@ -504,7 +509,7 @@ class PriorityChart(Static):
             bar = "█" * bar_len
             bars.append(f"[bold {color}]{label}: {bar} {count}[/] ({pct:.0f}%)")
         content = "\n".join(bars)
-        print(f"[DEBUG] PriorityChart updating with {len(content)} chars", file=__import__("sys").stderr)
+        _debug(f"PriorityChart updating with {len(content)} chars")
         self.update(content)
 
 
@@ -512,10 +517,10 @@ class CompletionGauge(Static):
     def __init__(self, store: TaskStore):
         super().__init__()
         self.store = store
-        print("[DEBUG] CompletionGauge.__init__", file=__import__("sys").stderr)
+        _debug("CompletionGauge.__init__")
 
     def on_mount(self):
-        print("[DEBUG] CompletionGauge.on_mount", file=__import__("sys").stderr)
+        _debug("CompletionGauge.on_mount")
         self._refresh_gauge()
 
     def _refresh_gauge(self):
@@ -524,7 +529,7 @@ class CompletionGauge(Static):
         bar_len = max(1, int(rate / 4))
         gauge = "█" * bar_len + "░" * (25 - bar_len)
         content = f"[bold green]{gauge}[/] {rate:.0f}%\n[grey50]{c['done']} done of {c['total']} total[/]"
-        print(f"[DEBUG] CompletionGauge updating bar_len={bar_len} rate={rate:.0f}%", file=__import__("sys").stderr)
+        _debug(f"CompletionGauge updating bar_len={bar_len} rate={rate:.0f}%")
         self.update(content)
 
 
@@ -532,16 +537,16 @@ class GroupsChart(Static):
     def __init__(self, store: TaskStore):
         super().__init__()
         self.store = store
-        print("[DEBUG] GroupsChart.__init__", file=__import__("sys").stderr)
+        _debug("GroupsChart.__init__")
 
     def on_mount(self):
-        print("[DEBUG] GroupsChart.on_mount", file=__import__("sys").stderr)
+        _debug("GroupsChart.on_mount")
         self._refresh_groups()
 
     def _refresh_groups(self):
         groups = self.store.group_counts
         if not groups:
-            print("[DEBUG] GroupsChart no groups", file=__import__("sys").stderr)
+            _debug("GroupsChart no groups")
             self.update("[grey50]no groups[/]")
             return
         lines = []
@@ -549,7 +554,7 @@ class GroupsChart(Static):
             bar = "▓" * count
             lines.append(f"[grey62]#{name:<10} {bar} {count}[/]")
         content = "\n".join(lines)
-        print(f"[DEBUG] GroupsChart updating with {len(lines)} groups", file=__import__("sys").stderr)
+        _debug(f"GroupsChart updating with {len(lines)} groups")
         self.update(content)
 
 
@@ -557,10 +562,10 @@ class RecentLog(Static):
     def __init__(self, store: TaskStore):
         super().__init__()
         self.store = store
-        print("[DEBUG] RecentLog.__init__", file=__import__("sys").stderr)
+        _debug("RecentLog.__init__")
 
     def on_mount(self):
-        print("[DEBUG] RecentLog.on_mount", file=__import__("sys").stderr)
+        _debug("RecentLog.on_mount")
         self._refresh_log()
 
     def _refresh_log(self):
@@ -888,9 +893,9 @@ class PlexoApp(App):
     def _switch_view(self, name: str):
         if self._current_view == name:
             return
-        print(f"[DEBUG] _switch_view to {name}", file=__import__("sys").stderr)
-        print(f"[DEBUG] store has {len(self.store.tasks)} tasks, {len(self.store.logs)} logs", file=__import__("sys").stderr)
-        print(f"[DEBUG] store counts: {self.store.counts}", file=__import__("sys").stderr)
+        _debug(f"_switch_view to {name}")
+        _debug(f"store has {len(self.store.tasks)} tasks, {len(self.store.logs)} logs")
+        _debug(f"store counts: {self.store.counts}")
         screens = {
             "tasks": TaskScreen(self.store),
             "dashboard": DashboardScreen(self.store),
