@@ -22,11 +22,6 @@ from rich.layout import Layout
 
 from .storage import TaskStore, PRIO_COLORS, STATUS_ICONS, STATUS_CYCLE
 
-_DEBUG_LOG = open("/tmp/plexo-debug.log", "w")
-def _debug(msg: str):
-    _DEBUG_LOG.write(msg + "\n")
-    _DEBUG_LOG.flush()
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # CSS — dark theme, amber accents, round borders
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -439,10 +434,8 @@ class DashboardScreen(Screen):
     def __init__(self, store: TaskStore):
         super().__init__()
         self.store = store
-        _debug("DashboardScreen.__init__")
 
     def compose(self) -> ComposeResult:
-        _debug("DashboardScreen.compose start")
         with Horizontal(classes="stats-grid"):
             for label, key, card_class, color in [
                 ("Total", "total", "stat-card-total", "#e4e4e7"),
@@ -469,10 +462,6 @@ class DashboardScreen(Screen):
         with Vertical(classes="dash-section"):
             yield Static("RECENT ACTIVITY", classes="dash-title")
             yield Static(_render_recent(self.store), markup=True)
-        _debug("DashboardScreen.compose end")
-
-    def on_mount(self):
-        _debug("DashboardScreen.on_mount called")
 
     def action_switch_tasks(self):
         self.app.switch_to_tasks()
@@ -891,9 +880,6 @@ class PlexoApp(App):
     def _switch_view(self, name: str):
         if self._current_view == name:
             return
-        _debug(f"_switch_view to {name}")
-        _debug(f"store has {len(self.store.tasks)} tasks, {len(self.store.logs)} logs")
-        _debug(f"store counts: {self.store.counts}")
         screens = {
             "tasks": TaskScreen(self.store),
             "dashboard": DashboardScreen(self.store),
