@@ -8,11 +8,11 @@ Plexo is a lightweight, self-hosted task manager with **three interfaces**: a mo
 
 ## Screenshots
 
-> _Replace these placeholders after running `./plexo --mock` and taking screenshots._
-
-| Web UI | Terminal UI |
-|--------|-------------|
-| ![Web UI screenshot](screenshots/web-ui.png) | ![TUI screenshot](screenshots/tui.png) |
+| Tasks (1) | Dashboard (2) |
+|-----------|---------------|
+| ![Tasks view](screenshots/tasks.png) | ![Dashboard top](screenshots/dashboard-1.png) |
+| **Dashboard (2) — bottom** | **Logs (3)** |
+| ![Dashboard bottom](screenshots/dashboard-2.png) | ![Log viewer](screenshots/logs.png) |
 
 ---
 
