@@ -8,7 +8,7 @@ Plexo is a lightweight, self-hosted task manager with **three interfaces**: a mo
 
 ## Screenshots
 
-> _Screenshots coming soon — replace these placeholders after running the project._
+> _Replace these placeholders after running `./plexo --mock` and taking screenshots._
 
 | Web UI | Terminal UI |
 |--------|-------------|
@@ -40,6 +40,9 @@ xdg-open http://localhost:8082
 
 # 3. Or launch the Terminal UI
 ./plexo
+
+# 4. Screenshot mode (mock data, doesn't touch your real tasks)
+./plexo --mock
 ```
 
 ---

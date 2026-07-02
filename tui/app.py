@@ -851,9 +851,9 @@ class PlexoApp(App):
     TITLE = "plexo"
     SUB_TITLE = "open tasks"
 
-    def __init__(self):
+    def __init__(self, mock=False):
         super().__init__()
-        self.store = TaskStore()
+        self.store = TaskStore(use_mock=mock)
         self._current_view = "tasks"
 
     def compose(self) -> ComposeResult:
@@ -901,7 +901,9 @@ class PlexoApp(App):
 
 
 def main():
-    app = PlexoApp()
+    import sys
+    mock = "--mock" in sys.argv
+    app = PlexoApp(mock=mock)
     app.run()
 
 
