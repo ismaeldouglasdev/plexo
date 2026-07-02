@@ -506,6 +506,8 @@ class PriorityChart(Static):
 
 
 class CompletionGauge(Static):
+    BAR_WIDTH = 30
+
     def __init__(self, store: TaskStore):
         super().__init__()
         self.store = store
@@ -514,17 +516,40 @@ class CompletionGauge(Static):
         self._refresh_gauge()
 
     def _refresh_gauge(self):
-        rate = self.store.completion_rate
         c = self.store.counts
-        bar_len = max(1, int(rate / 4))
-        gauge = "█" * bar_len + "░" * (25 - bar_len)
+        total = c["total"] or 1
+
+        segments = [
+            (c["todo"], "grey35", "░"),
+            (c["in_progress"], "yellow", "▓"),
+            (c["done"], "green", "█"),
+            (c["paused"], "grey50", "⊘"),
+        ]
+        filled = 0
+        bar_parts = []
+        for count, color, char in segments:
+            width = round(count / total * self.BAR_WIDTH)
+            if width > 0:
+                bar_parts.append(f"[{color}]{char * width}[/]")
+                filled += width
+        remainder = self.BAR_WIDTH - filled
+        if remainder > 0:
+            bar_parts.append(f"[grey20]{'░' * remainder}[/]")
+
+        bar = "".join(bar_parts)
+        rate = self.store.completion_rate
         self.update(
-            f"[bold green]{gauge}[/] {rate:.0f}%\n"
-            f"[grey50]{c['done']} done of {c['total']} total[/]"
+            f"{bar}\n"
+            f"[bold green]{rate:.0f}%[/] complete  "
+            f"[grey50]·[/]  [green]{c['done']} done[/] "
+            f"[grey50]of {total} total[/]  "
+            f"[grey35]● {c['todo']} ◔ {c['in_progress']} ⊘ {c['paused']}[/]"
         )
 
 
 class GroupsChart(Static):
+    BAR_WIDTH = 25
+
     def __init__(self, store: TaskStore):
         super().__init__()
         self.store = store
@@ -535,12 +560,16 @@ class GroupsChart(Static):
     def _refresh_groups(self):
         groups = self.store.group_counts
         if not groups:
-            self.update("[grey50]no groups[/]")
+            self.update("[grey50]no groups yet[/]")
             return
+        max_count = max(c for _, c in groups) if groups else 1
         lines = []
-        for name, count in groups[:6]:
-            bar = "▓" * count
-            lines.append(f"[grey62]#{name:<10} {bar} {count}[/]")
+        for name, count in groups[:8]:
+            bar_len = round(count / max_count * self.BAR_WIDTH) if max_count > 0 else 1
+            bar = "▓" * bar_len
+            done = sum(1 for t in self.store.tasks if t.group == name and t.status == "done")
+            done_str = f"[green]{done}✓[/]" if done else " " * 4
+            lines.append(f"[grey62]#{name:<12}[/] [{count:>2}] {bar}  {done_str}")
         self.update("\n".join(lines))
 
 
@@ -593,7 +622,7 @@ class LogScreen(Screen):
         self.store = store
 
     def compose(self) -> ComposeResult:
-        yield RichLog(id="log-view", highlight=True, wrap=True)
+        yield RichLog(id="log-view", markup=True, wrap=True)
 
     def on_mount(self):
         self._refresh()
@@ -604,7 +633,10 @@ class LogScreen(Screen):
         level_colors = {"info": "grey50", "success": "green", "warn": "yellow", "error": "red"}
         for entry in self.store.logs[:200]:
             color = level_colors.get(entry.level, "grey50")
-            log_widget.write(f"[{color}][{entry.action:<8}][/] {entry.message} [grey35]{format_time(entry.timestamp)}[/]")
+            text = Text.from_markup(
+                f"[{color}][{entry.action:<8}][/] {entry.message} [grey35]{format_time(entry.timestamp)}[/]"
+            )
+            log_widget.write(text)
 
     def action_switch_tasks(self):
         self.app.switch_to_tasks()
