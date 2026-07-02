@@ -432,8 +432,10 @@ class DashboardScreen(Screen):
     def __init__(self, store: TaskStore):
         super().__init__()
         self.store = store
+        print("[DEBUG] DashboardScreen.__init__", file=__import__("sys").stderr)
 
     def compose(self) -> ComposeResult:
+        print("[DEBUG] DashboardScreen.compose start", file=__import__("sys").stderr)
         with Horizontal(classes="stats-grid"):
             for label, key, card_class, color in [
                 ("Total", "total", "stat-card-total", "#e4e4e7"),
@@ -445,7 +447,6 @@ class DashboardScreen(Screen):
                     yield Static(label.upper(), classes="stat-label")
                     yield Static(f"[bold {color}]{self.store.counts[key]}[/]", classes="stat-value")
 
-        # Priority chart
         with Vertical(classes="dash-section"):
             yield Static("PRIORITY DISTRIBUTION", classes="dash-title")
             yield PriorityChart(self.store)
@@ -457,13 +458,13 @@ class DashboardScreen(Screen):
             yield Static("GROUPS", classes="dash-title")
             yield GroupsChart(self.store)
 
-        # Recent activity
         with Vertical(classes="dash-section"):
             yield Static("RECENT ACTIVITY", classes="dash-title")
             yield RecentLog(self.store)
+        print("[DEBUG] DashboardScreen.compose end", file=__import__("sys").stderr)
 
     def on_mount(self):
-        pass  # fresh compose on each switch — no timer needed
+        print("[DEBUG] DashboardScreen.on_mount called", file=__import__("sys").stderr)
 
     def action_switch_tasks(self):
         self.app.switch_to_tasks()
@@ -486,8 +487,10 @@ class PriorityChart(Static):
     def __init__(self, store: TaskStore):
         super().__init__()
         self.store = store
+        print("[DEBUG] PriorityChart.__init__", file=__import__("sys").stderr)
 
     def on_mount(self):
+        print("[DEBUG] PriorityChart.on_mount", file=__import__("sys").stderr)
         self._refresh_chart()
 
     def _refresh_chart(self):
@@ -500,15 +503,19 @@ class PriorityChart(Static):
             bar_len = max(1, int(pct / 5))
             bar = "█" * bar_len
             bars.append(f"[bold {color}]{label}: {bar} {count}[/] ({pct:.0f}%)")
-        self.update("\n".join(bars))
+        content = "\n".join(bars)
+        print(f"[DEBUG] PriorityChart updating with {len(content)} chars", file=__import__("sys").stderr)
+        self.update(content)
 
 
 class CompletionGauge(Static):
     def __init__(self, store: TaskStore):
         super().__init__()
         self.store = store
+        print("[DEBUG] CompletionGauge.__init__", file=__import__("sys").stderr)
 
     def on_mount(self):
+        print("[DEBUG] CompletionGauge.on_mount", file=__import__("sys").stderr)
         self._refresh_gauge()
 
     def _refresh_gauge(self):
@@ -516,38 +523,44 @@ class CompletionGauge(Static):
         c = self.store.counts
         bar_len = max(1, int(rate / 4))
         gauge = "█" * bar_len + "░" * (25 - bar_len)
-        self.update(
-            f"[bold green]{gauge}[/] {rate:.0f}%\n"
-            f"[grey50]{c['done']} done of {c['total']} total[/]"
-        )
+        content = f"[bold green]{gauge}[/] {rate:.0f}%\n[grey50]{c['done']} done of {c['total']} total[/]"
+        print(f"[DEBUG] CompletionGauge updating bar_len={bar_len} rate={rate:.0f}%", file=__import__("sys").stderr)
+        self.update(content)
 
 
 class GroupsChart(Static):
     def __init__(self, store: TaskStore):
         super().__init__()
         self.store = store
+        print("[DEBUG] GroupsChart.__init__", file=__import__("sys").stderr)
 
     def on_mount(self):
+        print("[DEBUG] GroupsChart.on_mount", file=__import__("sys").stderr)
         self._refresh_groups()
 
     def _refresh_groups(self):
         groups = self.store.group_counts
         if not groups:
+            print("[DEBUG] GroupsChart no groups", file=__import__("sys").stderr)
             self.update("[grey50]no groups[/]")
             return
         lines = []
         for name, count in groups[:6]:
             bar = "▓" * count
             lines.append(f"[grey62]#{name:<10} {bar} {count}[/]")
-        self.update("\n".join(lines))
+        content = "\n".join(lines)
+        print(f"[DEBUG] GroupsChart updating with {len(lines)} groups", file=__import__("sys").stderr)
+        self.update(content)
 
 
 class RecentLog(Static):
     def __init__(self, store: TaskStore):
         super().__init__()
         self.store = store
+        print("[DEBUG] RecentLog.__init__", file=__import__("sys").stderr)
 
     def on_mount(self):
+        print("[DEBUG] RecentLog.on_mount", file=__import__("sys").stderr)
         self._refresh_log()
 
     def _refresh_log(self):
@@ -873,15 +886,16 @@ class PlexoApp(App):
         self._switch_view("logs")
 
     def _switch_view(self, name: str):
-        """Switch to a named view, clearing any screens above root."""
         if self._current_view == name:
             return
+        print(f"[DEBUG] _switch_view to {name}", file=__import__("sys").stderr)
+        print(f"[DEBUG] store has {len(self.store.tasks)} tasks, {len(self.store.logs)} logs", file=__import__("sys").stderr)
+        print(f"[DEBUG] store counts: {self.store.counts}", file=__import__("sys").stderr)
         screens = {
             "tasks": TaskScreen(self.store),
             "dashboard": DashboardScreen(self.store),
             "logs": LogScreen(self.store),
         }
-        # Pop everything above root — handles leftover modals too
         while len(self.screen_stack) > 1:
             self.pop_screen()
         self.push_screen(screens[name])
