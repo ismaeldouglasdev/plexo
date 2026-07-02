@@ -39,7 +39,7 @@ Plexo is a lightweight, self-hosted task manager with **three interfaces**: a mo
 xdg-open http://localhost:8082
 
 # 3. Or launch the Terminal UI
-./singularity
+./plexo
 ```
 
 ---
@@ -50,7 +50,7 @@ xdg-open http://localhost:8082
 task-manager/
 ├── server.py          # Python API server (http.server)
 ├── serve.sh           # Server launcher
-├── singularity        # TUI launcher script
+├── plexo              # TUI launcher script
 ├── src/               # React + Vite frontend
 │   ├── components/    # UI components (shadcn/ui + Radix)
 │   ├── hooks/         # Custom React hooks
