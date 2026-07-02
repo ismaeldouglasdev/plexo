@@ -1,162 +1,21 @@
-# Plexo — Centralized Task Manager
+<p align="center">
+  <strong>🇧🇷 Português</strong> &nbsp;|&nbsp; <a href="README.en.md">🇺🇸 English</a>
+</p>
 
-Plexo is a lightweight, self-hosted task manager with **three interfaces**: a modern **Web UI** (React + Vite), a **Terminal UI** (Textual), and a **REST API** server.
+<p align="center">
+  <img src="screenshots/web-dashboard1.png" alt="Plexo" width="600">
+</p>
 
-> Your tasks live in `~/.plexo/tasks.json` — plain JSON, fully local, no database required.
+<h1 align="center">📋 Plexo</h1>
 
----
+<p align="center">
+  Gerenciador de tarefas centralizado com <strong>Web UI</strong>, <strong>Terminal UI</strong> e <strong>API REST</strong>.
+  <br>
+  Totalmente local, JSON puro, sem banco de dados.
+</p>
 
-## Screenshots
-
-### Terminal UI
-
-| Tasks (1) | Dashboard (2) |
-|-----------|---------------|
-| ![TUI Tasks view](screenshots/tasks.png) | ![TUI Dashboard top](screenshots/dashboard-1.png) |
-| **Dashboard (2) — bottom** | **Logs (3)** |
-| ![TUI Dashboard bottom](screenshots/dashboard-2.png) | ![TUI Log viewer](screenshots/logs.png) |
-
-### Web UI
-
-| Tasks | Dashboard |
-|------|-----------|
-| ![Web Tasks view](screenshots/web-tasks.png) | ![Web Dashboard top](screenshots/web-dashboard1.png) |
-| **Dashboard — bottom** | **Logs** |
-| ![Web Dashboard bottom](screenshots/web-dashboard2.png) | ![Web Log viewer](screenshots/web-logs.png) |
-
----
-
-## Features
-
-- **Web UI** — Dashboard with task cards, filters, priority badges, stats
-- **Terminal UI** — Full-featured TUI with keyboard shortcuts (`a` add, `e` edit, `d` delete, `/` search)
-- **REST API** — CRUD endpoints for tasks + activity log
-- **Real-time** — Web UI polls the API every 10s for live updates
-- **Priority system** — High / Medium / Low with visual badges
-- **Groups** — Organize tasks by project or context
-- **Activity log** — Every creation, update, and completion is tracked
-- **Server-side logging** — All operations logged to `~/.plexo/logs.json`
-
----
-
-## Quick Start
-
-```bash
-# 1. Start the API server
-./serve.sh 8082
-
-# 2. Open the Web UI
-xdg-open http://localhost:8082
-
-# 3. Or launch the Terminal UI
-./plexo
-```
-
----
-
-## Architecture
-
-```
-task-manager/
-├── server.py          # Python API server (http.server)
-├── serve.sh           # Server launcher
-├── plexo              # TUI launcher script
-├── src/               # React + Vite frontend
-│   ├── components/    # UI components (shadcn/ui + Radix)
-│   ├── hooks/         # Custom React hooks
-│   ├── data/          # Data layer
-│   └── lib/           # Utilities
-├── tui/               # Terminal UI (Python Textual)
-│   └── app.py         # TUI application
-├── dist/              # Built frontend (served by server.py)
-└── public/            # Static assets
-```
-
-### Data Flow
-
-```
-User ──► Web UI  ──┐
-         TUI    ──┤──► API (server.py:8082) ──► ~/.plexo/tasks.json
-         curl   ──┘                            ~/.plexo/logs.json
-```
-
----
-
-## Agent Integration (AI Skills)
-
-Plexo can be controlled by AI agents (OpenCode, Claude Code, etc.) via its REST API, making it a **task hub for agentic workflows**.
-
-Agents use the [**plexo skill**](https://github.com/ismaeldouglasdev/plexo) to:
-- **Onboarding** — Load pending tasks at session start
-- **Discovery** — Auto-create tasks when the user mentions new work
-- **Tracking** — Update task status (todo → in_progress → done)
-- **Observability** — Notify the user on completion via desktop notification
-
-### Agent workflow
-
-```
-Agent starts → Load plexo skill → GET /api/tasks → Show user pending tasks
-    ↓
-User mentions a task → POST /api/tasks/add → Auto-create with context
-    ↓
-Work completed → POST /api/tasks/update-status → Desktop notification
-```
-
-This turns Plexo into a **persistent task backbone** for AI-assisted development — no matter which agent or session, everyone sees the same tasks.
-
----
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/tasks` | List all tasks |
-| `POST` | `/api/tasks/add` | Create a task |
-| `POST` | `/api/tasks/update-status` | Change task status |
-| `POST` | `/api/tasks/delete` | Delete a task |
-| `GET` | `/api/logs` | Activity history |
-| `GET` | `/api/stats` | Task counts (total, todo, done, etc.) |
-
-All data is stored in plain JSON at `~/.plexo/` — no external dependencies.
-
----
-
-## Development
-
-```bash
-# Install dependencies
-pnpm install
-
-# Start Vite dev server
-pnpm dev
-
-# Build frontend
-pnpm build
-
-# Rebuild and restart server
-pnpm build && ./serve.sh 8082
-```
-
-Frontend is built with **React 19**, **TypeScript**, **Vite**, **Tailwind CSS**, and **shadcn/ui**. The TUI uses **Python Textual**.
-
----
-
-## Keyboard Shortcuts (TUI)
-
-| Key | Action |
-|-----|--------|
-| `a` | Add task |
-| `e` | Edit task |
-| `d` | Delete task |
-| `Enter` | Toggle status (todo ↔ done) |
-| `/` | Search |
-| `1` | Tasks view |
-| `2` | Dashboard view |
-| `3` | Logs view |
-| `q` | Quit |
-
----
-
-## License
-
-MIT
+<p align="center">
+  <a href="README.pt-BR.md">🇧🇷 Ler em Português</a>
+  &nbsp;·&nbsp;
+  <a href="README.en.md">🇺🇸 Read in English</a>
+</p>
