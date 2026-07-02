@@ -446,35 +446,34 @@ class DashboardScreen(Screen):
 
         with Vertical(classes="dash-section"):
             yield Static("PRIORITY DISTRIBUTION", classes="dash-title")
-            yield Static(id="dash-priority", markup=True)
+            yield Static(self._render_priority(), markup=True)
 
         with Vertical(classes="dash-section"):
             yield Static("COMPLETION", classes="dash-title")
-            yield Static(id="dash-completion", markup=True)
+            yield Static(self._render_completion(), markup=True)
 
         with Vertical(classes="dash-section"):
             yield Static("GROUPS", classes="dash-title")
-            yield Static(id="dash-groups", markup=True)
+            yield Static(self._render_groups(), markup=True)
 
         with Vertical(classes="dash-section"):
             yield Static("RECENT ACTIVITY", classes="dash-title")
-            yield Static(id="dash-recent", markup=True)
+            yield Static(self._render_recent(), markup=True)
 
-    def on_mount(self):
-        self._refresh_all()
-
-    def _refresh_all(self):
+    def _render_priority(self) -> str:
         c = self.store.counts
         total = c["total"] or 1
-
         bars = []
         for prio, color, label in [("high", "red", "HIGH"), ("medium", "yellow", "MED"), ("low", "green", "LOW")]:
             count = c[prio]
             pct = count / total * 100
             bar_len = max(1, int(pct / 5))
             bars.append(f"[bold {color}]{label}: {'█' * bar_len} {count}[/] ({pct:.0f}%)")
-        self.query_one("#dash-priority").update("\n".join(bars))
+        return "\n".join(bars)
 
+    def _render_completion(self) -> str:
+        c = self.store.counts
+        total = c["total"] or 1
         segments = [
             (c["todo"], "grey35", "░"),
             (c["in_progress"], "yellow", "▓"),
@@ -492,7 +491,7 @@ class DashboardScreen(Screen):
         if remainder > 0:
             bar_parts.append(f"[grey20]{'░' * remainder}[/]")
         rate = self.store.completion_rate
-        self.query_one("#dash-completion").update(
+        return (
             f"{''.join(bar_parts)}\n"
             f"[bold green]{rate:.0f}%[/] complete  "
             f"[grey50]·[/]  [green]{c['done']} done[/] "
@@ -500,38 +499,37 @@ class DashboardScreen(Screen):
             f"[grey35]● {c['todo']} ◔ {c['in_progress']} ⊘ {c['paused']}[/]"
         )
 
+    def _render_groups(self) -> str:
         groups = self.store.group_counts
-        if groups:
-            max_count = max(c for _, c in groups)
-            lines = []
-            for name, count in groups[:8]:
-                bar_len = round(count / max_count * 25) if max_count > 0 else 1
-                done = sum(1 for t in self.store.tasks if t.group == name and t.status == "done")
-                done_str = f"[green]{done}✓[/]" if done else " " * 4
-                lines.append(f"[grey62]#{name:<12}[/] [{count:>2}] {'▓' * bar_len}  {done_str}")
-            self.query_one("#dash-groups").update("\n".join(lines))
-        else:
-            self.query_one("#dash-groups").update("[grey50]no groups yet[/]")
+        if not groups:
+            return "[grey50]no groups yet[/]"
+        max_count = max(c for _, c in groups)
+        lines = []
+        for name, count in groups[:8]:
+            bar_len = round(count / max_count * 25) if max_count > 0 else 1
+            done = sum(1 for t in self.store.tasks if t.group == name and t.status == "done")
+            done_str = f"[green]{done}✓[/]" if done else " " * 4
+            lines.append(f"[grey62]#{name:<12}[/] [{count:>2}] {'▓' * bar_len}  {done_str}")
+        return "\n".join(lines)
 
-        # Recent activity
+    def _render_recent(self) -> str:
         logs = self.store.logs[:8]
-        if logs:
-            level_colors = {"info": "grey50", "success": "green", "warn": "yellow", "error": "red"}
-            actions = {
-                "TASK_CREATED": "CREATED", "TASK_DELETED": "DELETED",
-                "TASK_UPDATED": "UPDATED", "TASK_STATUS_CHANGED": "STATUS",
-                "APP_INIT": "INIT", "SYSTEM_ERROR": "ERROR", "STORAGE_WARNING": "WARN",
-                "VIEW_CHANGED": "VIEW",
-            }
-            lines = []
-            for log in logs:
-                color = level_colors.get(log.level, "grey50")
-                action = actions.get(log.action, log.action[:6])
-                ago = format_time(log.timestamp)
-                lines.append(f"[{color}]{action:<7}[/] {log.message:<45} [grey35]{ago}[/]")
-            self.query_one("#dash-recent").update("\n".join(lines[:6]))
-        else:
-            self.query_one("#dash-recent").update("[grey50]no activity yet[/]")
+        if not logs:
+            return "[grey50]no activity yet[/]"
+        level_colors = {"info": "grey50", "success": "green", "warn": "yellow", "error": "red"}
+        actions = {
+            "TASK_CREATED": "CREATED", "TASK_DELETED": "DELETED",
+            "TASK_UPDATED": "UPDATED", "TASK_STATUS_CHANGED": "STATUS",
+            "APP_INIT": "INIT", "SYSTEM_ERROR": "ERROR", "STORAGE_WARNING": "WARN",
+            "VIEW_CHANGED": "VIEW",
+        }
+        lines = []
+        for log in logs:
+            color = level_colors.get(log.level, "grey50")
+            action = actions.get(log.action, log.action[:6])
+            ago = format_time(log.timestamp)
+            lines.append(f"[{color}]{action:<7}[/] {log.message:<45} [grey35]{ago}[/]")
+        return "\n".join(lines[:6])
 
     def action_switch_tasks(self):
         self.app.switch_to_tasks()
