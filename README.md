@@ -8,11 +8,21 @@ Plexo is a lightweight, self-hosted task manager with **three interfaces**: a mo
 
 ## Screenshots
 
+### Terminal UI
+
 | Tasks (1) | Dashboard (2) |
 |-----------|---------------|
-| ![Tasks view](screenshots/tasks.png) | ![Dashboard top](screenshots/dashboard-1.png) |
+| ![TUI Tasks view](screenshots/tasks.png) | ![TUI Dashboard top](screenshots/dashboard-1.png) |
 | **Dashboard (2) — bottom** | **Logs (3)** |
-| ![Dashboard bottom](screenshots/dashboard-2.png) | ![Log viewer](screenshots/logs.png) |
+| ![TUI Dashboard bottom](screenshots/dashboard-2.png) | ![TUI Log viewer](screenshots/logs.png) |
+
+### Web UI
+
+| Tasks | Dashboard |
+|------|-----------|
+| ![Web Tasks view](screenshots/web-tasks.png) | ![Web Dashboard top](screenshots/web-dashboard1.png) |
+| **Dashboard — bottom** | **Logs** |
+| ![Web Dashboard bottom](screenshots/web-dashboard2.png) | ![Web Log viewer](screenshots/web-logs.png) |
 
 ---
 
