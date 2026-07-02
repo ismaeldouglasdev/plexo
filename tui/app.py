@@ -489,10 +489,7 @@ class PriorityChart(Static):
         super().__init__()
         self.store = store
 
-    def on_mount(self):
-        self._refresh_chart()
-
-    def _refresh_chart(self):
+    def render(self):
         c = self.store.counts
         total = c["total"] or 1
         bars = []
@@ -502,7 +499,7 @@ class PriorityChart(Static):
             bar_len = max(1, int(pct / 5))
             bar = "█" * bar_len
             bars.append(f"[bold {color}]{label}: {bar} {count}[/] ({pct:.0f}%)")
-        self.update("\n".join(bars))
+        return Text.from_markup("\n".join(bars))
 
 
 class CompletionGauge(Static):
@@ -512,13 +509,9 @@ class CompletionGauge(Static):
         super().__init__()
         self.store = store
 
-    def on_mount(self):
-        self._refresh_gauge()
-
-    def _refresh_gauge(self):
+    def render(self):
         c = self.store.counts
         total = c["total"] or 1
-
         segments = [
             (c["todo"], "grey35", "░"),
             (c["in_progress"], "yellow", "▓"),
@@ -535,10 +528,9 @@ class CompletionGauge(Static):
         remainder = self.BAR_WIDTH - filled
         if remainder > 0:
             bar_parts.append(f"[grey20]{'░' * remainder}[/]")
-
         bar = "".join(bar_parts)
         rate = self.store.completion_rate
-        self.update(
+        return Text.from_markup(
             f"{bar}\n"
             f"[bold green]{rate:.0f}%[/] complete  "
             f"[grey50]·[/]  [green]{c['done']} done[/] "
@@ -554,14 +546,10 @@ class GroupsChart(Static):
         super().__init__()
         self.store = store
 
-    def on_mount(self):
-        self._refresh_groups()
-
-    def _refresh_groups(self):
+    def render(self):
         groups = self.store.group_counts
         if not groups:
-            self.update("[grey50]no groups yet[/]")
-            return
+            return Text.from_markup("[grey50]no groups yet[/]")
         max_count = max(c for _, c in groups) if groups else 1
         lines = []
         for name, count in groups[:8]:
@@ -570,7 +558,7 @@ class GroupsChart(Static):
             done = sum(1 for t in self.store.tasks if t.group == name and t.status == "done")
             done_str = f"[green]{done}✓[/]" if done else " " * 4
             lines.append(f"[grey62]#{name:<12}[/] [{count:>2}] {bar}  {done_str}")
-        self.update("\n".join(lines))
+        return Text.from_markup("\n".join(lines))
 
 
 class RecentLog(Static):
@@ -578,14 +566,10 @@ class RecentLog(Static):
         super().__init__()
         self.store = store
 
-    def on_mount(self):
-        self._refresh_log()
-
-    def _refresh_log(self):
+    def render(self):
         logs = self.store.logs[:8]
         if not logs:
-            self.update("[grey50]no activity yet[/]")
-            return
+            return Text.from_markup("[grey50]no activity yet[/]")
         lines = []
         level_colors = {"info": "grey50", "success": "green", "warn": "yellow", "error": "red"}
         actions = {
@@ -599,7 +583,7 @@ class RecentLog(Static):
             action = actions.get(log.action, log.action[:6])
             ago = format_time(log.timestamp)
             lines.append(f"[{color}]{action:<7}[/] {log.message:<45} [grey35]{ago}[/]")
-        self.update("\n".join(lines[:6]))
+        return Text.from_markup("\n".join(lines[:6]))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
