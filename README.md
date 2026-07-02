@@ -75,6 +75,30 @@ User ──► Web UI  ──┐
 
 ---
 
+## Agent Integration (AI Skills)
+
+Plexo can be controlled by AI agents (OpenCode, Claude Code, etc.) via its REST API, making it a **task hub for agentic workflows**.
+
+Agents use the [**plexo skill**](https://github.com/ismaeldouglasdev/plexo) to:
+- **Onboarding** — Load pending tasks at session start
+- **Discovery** — Auto-create tasks when the user mentions new work
+- **Tracking** — Update task status (todo → in_progress → done)
+- **Observability** — Notify the user on completion via desktop notification
+
+### Agent workflow
+
+```
+Agent starts → Load plexo skill → GET /api/tasks → Show user pending tasks
+    ↓
+User mentions a task → POST /api/tasks/add → Auto-create with context
+    ↓
+Work completed → POST /api/tasks/update-status → Desktop notification
+```
+
+This turns Plexo into a **persistent task backbone** for AI-assisted development — no matter which agent or session, everyone sees the same tasks.
+
+---
+
 ## API Endpoints
 
 | Method | Endpoint | Description |
