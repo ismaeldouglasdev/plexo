@@ -489,16 +489,12 @@ class DashboardScreen(Screen):
 # ─── Dashboard sub-widgets ────────────────────────────────────────────────────
 
 class PriorityChart(Static):
+    BAR_WIDTH = 20
     def __init__(self, store: TaskStore):
         super().__init__()
         self.store = store
-        _debug("PriorityChart.__init__")
 
-    def on_mount(self):
-        _debug("PriorityChart.on_mount")
-        self._refresh_chart()
-
-    def _refresh_chart(self):
+    def render(self):
         c = self.store.counts
         total = c["total"] or 1
         bars = []
@@ -506,67 +502,88 @@ class PriorityChart(Static):
             count = c[prio]
             pct = count / total * 100
             bar_len = max(1, int(pct / 5))
-            bar = "█" * bar_len
-            bars.append(f"[bold {color}]{label}: {bar} {count}[/] ({pct:.0f}%)")
-        content = "\n".join(bars)
-        _debug(f"PriorityChart updating with {len(content)} chars")
-        self.update(content)
+            bars.append(f"[bold {color}]{label}: {'█' * bar_len} {count}[/] ({pct:.0f}%)")
+        return Text.from_markup("\n".join(bars))
 
 
 class CompletionGauge(Static):
+    BAR_WIDTH = 30
     def __init__(self, store: TaskStore):
         super().__init__()
         self.store = store
-        _debug("CompletionGauge.__init__")
 
-    def on_mount(self):
-        _debug("CompletionGauge.on_mount")
-        self._refresh_gauge()
-
-    def _refresh_gauge(self):
-        rate = self.store.completion_rate
+    def render(self):
         c = self.store.counts
-        bar_len = max(1, int(rate / 4))
-        gauge = "█" * bar_len + "░" * (25 - bar_len)
-        content = f"[bold green]{gauge}[/] {rate:.0f}%\n[grey50]{c['done']} done of {c['total']} total[/]"
-        _debug(f"CompletionGauge updating bar_len={bar_len} rate={rate:.0f}%")
-        self.update(content)
+        total = c["total"] or 1
+        segments = [
+            (c["todo"], "grey35", "░"),
+            (c["in_progress"], "yellow", "▓"),
+            (c["done"], "green", "█"),
+            (c["paused"], "grey50", "⊘"),
+        ]
+        filled = 0
+        bar_parts = []
+        for count, color, char in segments:
+            width = round(count / total * self.BAR_WIDTH)
+            if width > 0:
+                bar_parts.append(f"[{color}]{char * width}[/]")
+                filled += width
+        remainder = self.BAR_WIDTH - filled
+        if remainder > 0:
+            bar_parts.append(f"[grey20]{'░' * remainder}[/]")
+        rate = self.store.completion_rate
+        return Text.from_markup(
+            f"{''.join(bar_parts)}\n"
+            f"[bold green]{rate:.0f}%[/] complete  "
+            f"[grey50]·[/]  [green]{c['done']} done[/] "
+            f"[grey50]of {total} total[/]  "
+            f"[grey35]● {c['todo']} ◔ {c['in_progress']} ⊘ {c['paused']}[/]"
+        )
 
 
 class GroupsChart(Static):
+    BAR_WIDTH = 25
     def __init__(self, store: TaskStore):
         super().__init__()
         self.store = store
-        _debug("GroupsChart.__init__")
 
-    def on_mount(self):
-        _debug("GroupsChart.on_mount")
-        self._refresh_groups()
-
-    def _refresh_groups(self):
+    def render(self):
         groups = self.store.group_counts
         if not groups:
-            _debug("GroupsChart no groups")
-            self.update("[grey50]no groups[/]")
-            return
+            return Text.from_markup("[grey50]no groups yet[/]")
+        max_count = max(c for _, c in groups) if groups else 1
         lines = []
-        for name, count in groups[:6]:
-            bar = "▓" * count
-            lines.append(f"[grey62]#{name:<10} {bar} {count}[/]")
-        content = "\n".join(lines)
-        _debug(f"GroupsChart updating with {len(lines)} groups")
-        self.update(content)
+        for name, count in groups[:8]:
+            bar_len = round(count / max_count * self.BAR_WIDTH) if max_count > 0 else 1
+            done = sum(1 for t in self.store.tasks if t.group == name and t.status == "done")
+            done_str = f"[green]{done}✓[/]" if done else " " * 4
+            lines.append(f"[grey62]#{name:<12}[/] [{count:>2}] {'▓' * bar_len}  {done_str}")
+        return Text.from_markup("\n".join(lines))
 
 
 class RecentLog(Static):
     def __init__(self, store: TaskStore):
         super().__init__()
         self.store = store
-        _debug("RecentLog.__init__")
 
-    def on_mount(self):
-        _debug("RecentLog.on_mount")
-        self._refresh_log()
+    def render(self):
+        logs = self.store.logs[:8]
+        if not logs:
+            return Text.from_markup("[grey50]no activity yet[/]")
+        level_colors = {"info": "grey50", "success": "green", "warn": "yellow", "error": "red"}
+        actions = {
+            "TASK_CREATED": "CREATED", "TASK_DELETED": "DELETED",
+            "TASK_UPDATED": "UPDATED", "TASK_STATUS_CHANGED": "STATUS",
+            "APP_INIT": "INIT", "SYSTEM_ERROR": "ERROR", "STORAGE_WARNING": "WARN",
+            "VIEW_CHANGED": "VIEW",
+        }
+        lines = []
+        for log in logs:
+            color = level_colors.get(log.level, "grey50")
+            action = actions.get(log.action, log.action[:6])
+            ago = format_time(log.timestamp)
+            lines.append(f"[{color}]{action:<7}[/] {log.message:<45} [grey35]{ago}[/]")
+        return Text.from_markup("\n".join(lines[:6]))
 
     def _refresh_log(self):
         logs = self.store.logs[:8]
