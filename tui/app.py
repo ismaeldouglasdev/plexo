@@ -419,6 +419,7 @@ class TaskScreen(Screen):
 # ═══════════════════════════════════════════════════════════════════════════════
 # Dashboard Screen
 # ═══════════════════════════════════════════════════════════════════════════════
+
 class DashboardScreen(Screen):
     BINDINGS = [
         Binding("1", "switch_tasks", "Tasks", show=False),
@@ -444,21 +445,25 @@ class DashboardScreen(Screen):
                     yield Static(label.upper(), classes="stat-label")
                     yield Static(f"[bold {color}]{self.store.counts[key]}[/]", classes="stat-value")
 
+        # Priority chart
         with Vertical(classes="dash-section"):
             yield Static("PRIORITY DISTRIBUTION", classes="dash-title")
-            yield PriorityWidget(self.store)
+            yield PriorityChart(self.store)
 
         with Vertical(classes="dash-section"):
             yield Static("COMPLETION", classes="dash-title")
-            yield CompletionWidget(self.store)
-
+            yield CompletionGauge(self.store)
         with Vertical(classes="dash-section"):
             yield Static("GROUPS", classes="dash-title")
-            yield GroupsWidget(self.store)
+            yield GroupsChart(self.store)
 
+        # Recent activity
         with Vertical(classes="dash-section"):
             yield Static("RECENT ACTIVITY", classes="dash-title")
-            yield RecentWidget(self.store)
+            yield RecentLog(self.store)
+
+    def on_mount(self):
+        pass  # fresh compose on each switch — no timer needed
 
     def action_switch_tasks(self):
         self.app.switch_to_tasks()
@@ -475,15 +480,17 @@ class DashboardScreen(Screen):
     def action_focus_search(self):
         self.app.switch_to_tasks()
 
+# ─── Dashboard sub-widgets ────────────────────────────────────────────────────
 
-# ─── Dashboard widgets ────────────────────────────────────────────────────────
-
-class PriorityWidget(Static):
+class PriorityChart(Static):
     def __init__(self, store: TaskStore):
         super().__init__()
         self.store = store
 
-    def render(self):
+    def on_mount(self):
+        self._refresh_chart()
+
+    def _refresh_chart(self):
         c = self.store.counts
         total = c["total"] or 1
         bars = []
@@ -491,74 +498,64 @@ class PriorityWidget(Static):
             count = c[prio]
             pct = count / total * 100
             bar_len = max(1, int(pct / 5))
-            bars.append(f"[bold {color}]{label}: {'█' * bar_len} {count}[/] ({pct:.0f}%)")
-        return Text.from_markup("\n".join(bars))
+            bar = "█" * bar_len
+            bars.append(f"[bold {color}]{label}: {bar} {count}[/] ({pct:.0f}%)")
+        self.update("\n".join(bars))
 
 
-class CompletionWidget(Static):
-    BAR_WIDTH = 30
+class CompletionGauge(Static):
     def __init__(self, store: TaskStore):
         super().__init__()
         self.store = store
 
-    def render(self):
-        c = self.store.counts
-        total = c["total"] or 1
-        segments = [
-            (c["todo"], "grey35", "░"),
-            (c["in_progress"], "yellow", "▓"),
-            (c["done"], "green", "█"),
-            (c["paused"], "grey50", "⊘"),
-        ]
-        filled = 0
-        bar_parts = []
-        for count, color, char in segments:
-            width = round(count / total * self.BAR_WIDTH)
-            if width > 0:
-                bar_parts.append(f"[{color}]{char * width}[/]")
-                filled += width
-        remainder = self.BAR_WIDTH - filled
-        if remainder > 0:
-            bar_parts.append(f"[grey20]{'░' * remainder}[/]")
+    def on_mount(self):
+        self._refresh_gauge()
+
+    def _refresh_gauge(self):
         rate = self.store.completion_rate
-        return Text.from_markup(
-            f"{''.join(bar_parts)}\n"
-            f"[bold green]{rate:.0f}%[/] complete  "
-            f"[grey50]·[/]  [green]{c['done']} done[/] "
-            f"[grey50]of {total} total[/]  "
-            f"[grey35]● {c['todo']} ◔ {c['in_progress']} ⊘ {c['paused']}[/]"
+        c = self.store.counts
+        bar_len = max(1, int(rate / 4))
+        gauge = "█" * bar_len + "░" * (25 - bar_len)
+        self.update(
+            f"[bold green]{gauge}[/] {rate:.0f}%\n"
+            f"[grey50]{c['done']} done of {c['total']} total[/]"
         )
 
 
-class GroupsWidget(Static):
-    BAR_WIDTH = 25
+class GroupsChart(Static):
     def __init__(self, store: TaskStore):
         super().__init__()
         self.store = store
 
-    def render(self):
+    def on_mount(self):
+        self._refresh_groups()
+
+    def _refresh_groups(self):
         groups = self.store.group_counts
         if not groups:
-            return Text.from_markup("[grey50]no groups yet[/]")
-        max_count = max(c for _, c in groups) if groups else 1
+            self.update("[grey50]no groups[/]")
+            return
         lines = []
-        for name, count in groups[:8]:
-            bar_len = round(count / max_count * self.BAR_WIDTH) if max_count > 0 else 1
-            done = sum(1 for t in self.store.tasks if t.group == name and t.status == "done")
-            done_str = f"[green]{done}✓[/]" if done else " " * 4
-            lines.append(f"[grey62]#{name:<12}[/] [{count:>2}] {'▓' * bar_len}  {done_str}")
-        return Text.from_markup("\n".join(lines))
+        for name, count in groups[:6]:
+            bar = "▓" * count
+            lines.append(f"[grey62]#{name:<10} {bar} {count}[/]")
+        self.update("\n".join(lines))
 
 
-class RecentWidget(Static):
+class RecentLog(Static):
     def __init__(self, store: TaskStore):
         super().__init__()
         self.store = store
 
-    def render(self):
+    def on_mount(self):
+        self._refresh_log()
+
+    def _refresh_log(self):
         logs = self.store.logs[:8]
         if not logs:
-            return Text.from_markup("[grey50]no activity yet[/]")
+            self.update("[grey50]no activity yet[/]")
+            return
+        lines = []
         level_colors = {"info": "grey50", "success": "green", "warn": "yellow", "error": "red"}
         actions = {
             "TASK_CREATED": "CREATED", "TASK_DELETED": "DELETED",
@@ -566,13 +563,12 @@ class RecentWidget(Static):
             "APP_INIT": "INIT", "SYSTEM_ERROR": "ERROR", "STORAGE_WARNING": "WARN",
             "VIEW_CHANGED": "VIEW",
         }
-        lines = []
         for log in logs:
             color = level_colors.get(log.level, "grey50")
             action = actions.get(log.action, log.action[:6])
             ago = format_time(log.timestamp)
             lines.append(f"[{color}]{action:<7}[/] {log.message:<45} [grey35]{ago}[/]")
-        return Text.from_markup("\n".join(lines[:6]))
+        self.update("\n".join(lines[:6]))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -595,7 +591,7 @@ class LogScreen(Screen):
         self.store = store
 
     def compose(self) -> ComposeResult:
-        yield RichLog(id="log-view", markup=True, wrap=True)
+        yield RichLog(id="log-view", highlight=True, wrap=True)
 
     def on_mount(self):
         self._refresh()
@@ -606,10 +602,7 @@ class LogScreen(Screen):
         level_colors = {"info": "grey50", "success": "green", "warn": "yellow", "error": "red"}
         for entry in self.store.logs[:200]:
             color = level_colors.get(entry.level, "grey50")
-            text = Text.from_markup(
-                f"[{color}][{entry.action:<8}][/] {entry.message} [grey35]{format_time(entry.timestamp)}[/]"
-            )
-            log_widget.write(text)
+            log_widget.write(f"[{color}][{entry.action:<8}][/] {entry.message} [grey35]{format_time(entry.timestamp)}[/]")
 
     def action_switch_tasks(self):
         self.app.switch_to_tasks()
