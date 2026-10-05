@@ -48,6 +48,20 @@ CAMEL_CASE_MAP = {v: k for k, v in SNAKE_CASE_MAP.items()}
 TASK_REQUIRED_FIELDS = ("id", "title", "description", "priority", "status", "group")
 TASK_VALID_STATUS = ("todo", "in_progress", "done", "paused")
 TASK_VALID_PRIORITY = ("high", "medium", "low")
+TASK_MAX_TITLE = 200
+
+class _BadRequest(Exception):
+    """Body malformado: vira 400 em vez de derrubar a conexao sem resposta."""
+
+def _clean_enum(value, allowed, default):
+    """Normaliza um enum, devolvendo o default quando o valor nao serve.
+
+    Sem isto, _add_task/_update_task_status gravam 'URGENTE' ou 'hacked' direto no
+    tasks.json e a TUI deixa de conseguir construir o Task no proximo start.
+    """
+    if isinstance(value, str) and value.strip().lower() in allowed:
+        return value.strip().lower()
+    return default
 
 def _validate_tasks(tasks):
     """Devolve (ok, erro). Bulk replace grava o arquivo inteiro: validar é obrigatório."""
@@ -83,8 +97,17 @@ def _read_json(path: Path):
         return json.load(f)
 
 def _write_json(path: Path, data):
-    with open(path, "w") as f:
+    """Escrita atomica: grava em .tmp e renomeia.
+
+    Abrir o arquivo direto trunca se o processo morrer no meio -- e um tasks.json
+    truncado foi exatamente o que matou a TUI no boot em 2026-10-03.
+    """
+    tmp = path.with_name(path.name + ".tmp")
+    with open(tmp, "w") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
     # touch the file's mtime to trigger inotify watchers
     os.utime(path, None)
 
@@ -110,10 +133,18 @@ class PlexoHandler(BaseHTTPRequestHandler):
         self._send_json({"error": message}, status)
 
     def _read_body(self):
-        length = int(self.headers.get("Content-Length", 0))
-        if length == 0:
+        """Retorna o body parseado, ou None se ausente/invalido (raise _BadRequest)."""
+        raw_len = self.headers.get("Content-Length", 0)
+        try:
+            length = int(raw_len)
+        except (TypeError, ValueError):
+            raise _BadRequest("invalid Content-Length")
+        if length <= 0:
             return None
-        return json.loads(self.rfile.read(length))
+        try:
+            return json.loads(self.rfile.read(length))
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise _BadRequest(f"malformed JSON body: {e}") from e
 
     def _parse_path(self):
         parsed = urlparse(self.path)
@@ -137,6 +168,15 @@ class PlexoHandler(BaseHTTPRequestHandler):
             return self._serve_static()
 
     def do_POST(self):
+        try:
+            self._dispatch_post()
+        except _BadRequest as e:
+            self._send_error(400, str(e))
+        except Exception as e:  # noqa: BLE001
+            # Nunca derrubar a conexao sem resposta: o cliente ficava sem status.
+            self._send_error(500, f"internal error: {type(e).__name__}: {e}")
+
+    def _dispatch_post(self):
         path = self._parse_path()
         if path == "/api/tasks":
             return self._set_tasks()
@@ -206,17 +246,22 @@ class PlexoHandler(BaseHTTPRequestHandler):
         body = self._read_body()
         if body is None:
             return self._send_error(400, "Request body required")
+        if not isinstance(body, dict):
+            return self._send_error(400, "Body must be a JSON object")
+        title = body.get("title", "Untitled")
+        if not isinstance(title, str) or not title.strip():
+            return self._send_error(400, "'title' must be a non-empty string")
+        title = title.strip()[:TASK_MAX_TITLE]
         tasks = _read_json(TASKS_PATH)
 
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        import os as _os, time as _time
         task = {
-            "id": f"{int(_time.time())}-{_os.urandom(3).hex()}",
-            "title": body.get("title", "Untitled"),
-            "description": body.get("description", ""),
-            "priority": body.get("priority", "medium"),
-            "status": body.get("status", "todo"),
-            "group": body.get("group", "general"),
+            "id": f"{int(time.time())}-{os.urandom(3).hex()}",
+            "title": title,
+            "description": str(body.get("description", "") or "")[:2000],
+            "priority": _clean_enum(body.get("priority"), TASK_VALID_PRIORITY, "medium"),
+            "status": _clean_enum(body.get("status"), TASK_VALID_STATUS, "todo"),
+            "group": str(body.get("group", "general") or "general")[:50],
             "created_at": now,
             "updated_at": now,
         }
@@ -241,6 +286,13 @@ class PlexoHandler(BaseHTTPRequestHandler):
         new_status = body.get("status")
         if not task_id or not new_status:
             return self._send_error(400, "Fields 'id' and 'status' required")
+        if not isinstance(task_id, str):
+            return self._send_error(400, "'id' must be a string")
+        clean_status = _clean_enum(new_status, TASK_VALID_STATUS, None)
+        if clean_status is None:
+            return self._send_error(
+                400, f"Invalid status {new_status!r}. Valid: {', '.join(TASK_VALID_STATUS)}"
+            )
 
         tasks = _read_json(TASKS_PATH)
         found = None
@@ -248,7 +300,7 @@ class PlexoHandler(BaseHTTPRequestHandler):
         for t in tasks:
             if isinstance(t, dict) and t.get("id") == task_id:
                 old_status = t.get("status", "todo")
-                t["status"] = new_status
+                t["status"] = clean_status
                 t["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                 found = t
                 break
@@ -299,11 +351,11 @@ class PlexoHandler(BaseHTTPRequestHandler):
     def _append_log(self, entry: dict):
         """Internal: append a log entry to logs.json."""
         logs = _read_json(LOGS_PATH)
-        import os as _os, time as _time
+        # id/timestamp depois do spread: um caller nao pode forjar a ordem do log.
         log_entry = {
-            "id": f"{int(_time.time()*1000)}-{_os.urandom(2).hex()}",
-            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             **entry,
+            "id": f"{int(time.time()*1000)}-{os.urandom(2).hex()}",
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
         logs.insert(0, log_entry)
         if len(logs) > 500:
@@ -319,18 +371,30 @@ class PlexoHandler(BaseHTTPRequestHandler):
         body = self._read_body()
         if body is None:
             return self._send_error(400, "Request body required")
-        logs = _read_json(LOGS_PATH)
-        entry = _snake_keys(body)
-        logs.insert(0, entry)
-        _write_json(LOGS_PATH, logs)
+        if not isinstance(body, dict):
+            return self._send_error(400, "Body must be a JSON object")
+        level = _clean_enum(body.get("level"), ("info", "success", "warn", "error"), "info")
+        action = str(body.get("action", "MANUAL"))[:60]
+        message = str(body.get("message", ""))[:500]
+        task_id = body.get("task_id")
+        self._append_log({
+            "level": level,
+            "action": action,
+            "message": message,
+            "task_id": task_id if isinstance(task_id, str) else None,
+            "task_title": body.get("task_title") if isinstance(body.get("task_title"), str) else None,
+        })
         self._send_json({"ok": True})
 
     def _get_stats(self):
         tasks = _read_json(TASKS_PATH)
         counts = {"total": 0, "todo": 0, "in_progress": 0, "done": 0, "paused": 0}
         for t in tasks:
-            s = t.get("status", "todo")
-            counts[s] = counts.get(s, 0) + 1
+            # .get() com default, e nao counts[s] solto: um status invalido legado
+            # criaria uma chave nova e falsearia um contador.
+            s = t.get("status") if isinstance(t, dict) else None
+            if s in ("todo", "in_progress", "done", "paused"):
+                counts[s] += 1
             counts["total"] += 1
         self._send_json(counts)
 
@@ -353,10 +417,16 @@ class PlexoHandler(BaseHTTPRequestHandler):
         body = self._read_body()
         if body is None:
             return self._send_error(400, "Request body required")
+        if not isinstance(body, dict):
+            return self._send_error(400, "Body must be a JSON object")
+        if not any(isinstance(t, dict) and t.get("id") == task_id for t in _read_json(TASKS_PATH)):
+            return self._send_error(404, f"Task {task_id} not found")
         CONTEXTS_DIR.mkdir(parents=True, exist_ok=True)
         ctx_path = CONTEXTS_DIR / f"{task_id}.md"
-        content = body.get("content", "")
-        ctx_path.write_text(content, encoding="utf-8")
+        content = str(body.get("content", "") or "")
+        tmp = ctx_path.with_suffix(".md.tmp")
+        tmp.write_text(content, encoding="utf-8")
+        os.replace(tmp, ctx_path)
         self._append_log({
             "level": "info",
             "action": "CONTEXT_UPDATED",
