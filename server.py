@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import mimetypes
+import socket
 import time
 from http import HTTPStatus
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -15,6 +16,7 @@ from datetime import datetime, timezone
 HOME = os.path.expanduser("~")
 TASKS_PATH = Path(f"{HOME}/.plexo/tasks.json")
 LOGS_PATH = Path(f"{HOME}/.plexo/logs.json")
+CONTEXTS_DIR = Path(f"{HOME}/.plexo/contexts")
 STATIC_DIR = Path(__file__).resolve().parent / "dist"
 
 MOCK_TASKS = [
@@ -42,6 +44,31 @@ SNAKE_CASE_MAP = {
     "taskTitle": "task_title"
 }
 CAMEL_CASE_MAP = {v: k for k, v in SNAKE_CASE_MAP.items()}
+
+TASK_REQUIRED_FIELDS = ("id", "title", "description", "priority", "status", "group")
+TASK_VALID_STATUS = ("todo", "in_progress", "done", "paused")
+TASK_VALID_PRIORITY = ("high", "medium", "low")
+
+def _validate_tasks(tasks):
+    """Devolve (ok, erro). Bulk replace grava o arquivo inteiro: validar é obrigatório."""
+    if not isinstance(tasks, list):
+        return False, "'tasks' must be a list"
+    if not tasks:
+        return False, "refusing to write an empty task list"
+    for i, t in enumerate(tasks):
+        if not isinstance(t, dict):
+            return False, f"task[{i}] is not an object"
+        missing = [f for f in TASK_REQUIRED_FIELDS if f not in t or t[f] in (None, "")]
+        if missing:
+            return False, f"task[{i}] ({t.get('id', '?')}) missing: {', '.join(missing)}"
+        if t["status"] not in TASK_VALID_STATUS:
+            return False, f"task[{i}] invalid status {t['status']!r}"
+        if t["priority"] not in TASK_VALID_PRIORITY:
+            return False, f"task[{i}] invalid priority {t['priority']!r}"
+    ids = [t["id"] for t in tasks]
+    if len(set(ids)) != len(ids):
+        return False, "duplicate task ids"
+    return True, None
 
 def _snake_keys(d: dict) -> dict:
     return {SNAKE_CASE_MAP.get(k, k): v for k, v in d.items()}
@@ -98,6 +125,10 @@ class PlexoHandler(BaseHTTPRequestHandler):
         path = self._parse_path()
         if path == "/api/tasks":
             return self._get_tasks()
+        elif path.startswith("/api/tasks/") and path.endswith("/context"):
+            # /api/tasks/<id>/context
+            task_id = path.split("/")[3]
+            return self._get_task_context(task_id)
         elif path == "/api/logs":
             return self._get_logs()
         elif path == "/api/stats":
@@ -115,6 +146,9 @@ class PlexoHandler(BaseHTTPRequestHandler):
             return self._update_task_status()
         elif path == "/api/tasks/delete":
             return self._delete_task()
+        elif path.startswith("/api/tasks/") and path.endswith("/context"):
+            task_id = path.split("/")[3]
+            return self._set_task_context(task_id)
         elif path == "/api/logs":
             return self._add_log()
         else:
@@ -136,13 +170,35 @@ class PlexoHandler(BaseHTTPRequestHandler):
         self._send_json({"tasks": camel, "count": len(camel)})
 
     def _set_tasks(self):
+        """Bulk replace: sobrescreve TASKS_PATH inteiro. Exige replace:true + payload valido.
+
+        Endpoint nao documentado e sem callers conhecidos. Sem o replace:true explicito
+        um cliente que envie uma lista parcial apaga as outras tasks e recebe ok:true
+        (foi como a task 1788884267-f43ad7 perdeu titulo/descricao em 2026-09).
+        """
         body = self._read_body()
         if body is None:
             return self._send_error(400, "Request body required")
-        tasks = body.get("tasks", body if isinstance(body, list) else [body])
-        # convert camelCase → snake_case for storage
-        snake = [_snake_keys(t) for t in tasks]
+        if not isinstance(body, dict) or not body.get("replace"):
+            return self._send_error(
+                400,
+                "Bulk replace refused. Send {\"replace\": true, \"tasks\": [...]} "
+                "to overwrite every task. Use /api/tasks/add or "
+                "/api/tasks/update-status for single-task changes.",
+            )
+        raw = body.get("tasks")
+        incoming = raw if isinstance(raw, list) else []
+        ok, err = _validate_tasks(incoming)
+        if not ok:
+            return self._send_error(400, f"Invalid task list: {err}")
+        snake = [_snake_keys(t) if isinstance(t, dict) else {} for t in incoming]
+        before = len(_read_json(TASKS_PATH))
         _write_json(TASKS_PATH, snake)
+        self._append_log({
+            "level": "warn",
+            "action": "TASKS_REPLACED",
+            "message": f"Bulk replace: {before} -> {len(snake)} tasks",
+        })
         self._send_json({"ok": True, "count": len(snake)})
 
     def _add_task(self):
@@ -188,24 +244,26 @@ class PlexoHandler(BaseHTTPRequestHandler):
 
         tasks = _read_json(TASKS_PATH)
         found = None
+        old_status = None
         for t in tasks:
-            if t.get("id") == task_id:
+            if isinstance(t, dict) and t.get("id") == task_id:
                 old_status = t.get("status", "todo")
                 t["status"] = new_status
                 t["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                 found = t
                 break
 
-        if not found:
+        if found is None:
             return self._send_error(404, f"Task {task_id} not found")
 
+        title = found.get("title") or "(sem título)"
         _write_json(TASKS_PATH, tasks)
         self._append_log({
             "level": "info",
             "action": "TASK_STATUS_CHANGED",
-            "message": f'"{found["title"]}": {old_status} → {new_status}',
+            "message": f'"{title}": {old_status} → {new_status}',
             "task_id": task_id,
-            "task_title": found["title"],
+            "task_title": title,
         })
         self._send_json({"ok": True, "task": _camel_keys(found)})
 
@@ -276,6 +334,37 @@ class PlexoHandler(BaseHTTPRequestHandler):
             counts["total"] += 1
         self._send_json(counts)
 
+    # ── task context endpoints ───────────────────────────────────────────
+
+    def _get_task_context(self, task_id):
+        ctx_path = CONTEXTS_DIR / f"{task_id}.md"
+        if not ctx_path.exists():
+            self._send_error(404, f"Context for task {task_id} not found")
+            return
+        body = ctx_path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/markdown; charset=utf-8")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _set_task_context(self, task_id):
+        body = self._read_body()
+        if body is None:
+            return self._send_error(400, "Request body required")
+        CONTEXTS_DIR.mkdir(parents=True, exist_ok=True)
+        ctx_path = CONTEXTS_DIR / f"{task_id}.md"
+        content = body.get("content", "")
+        ctx_path.write_text(content, encoding="utf-8")
+        self._append_log({
+            "level": "info",
+            "action": "CONTEXT_UPDATED",
+            "message": f"Context updated for task {task_id}",
+            "task_id": task_id,
+        })
+        self._send_json({"ok": True, "task_id": task_id})
+
     # ── static file serving ──────────────────────────────────────────────
 
     def _serve_static(self):
@@ -331,9 +420,11 @@ def main():
         if not LOGS_PATH.exists():
             _write_json(LOGS_PATH, [])
 
-    server = HTTPServer(("0.0.0.0", port), PlexoHandler)
-    addr = "localhost"
-    print(f"🚀 plexo API + UI at http://0.0.0.0:{port}")
+    bind = os.environ.get("PLEXO_BIND", "127.0.0.1")
+    server = HTTPServer((bind, port), PlexoHandler)
+    server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    addr = "localhost" if bind in ("127.0.0.1", "localhost") else bind
+    print(f"🚀 plexo API + UI at http://{bind}:{port}")
     print(f"   PC:  http://{addr}:{port}")
     try:
         server.serve_forever()

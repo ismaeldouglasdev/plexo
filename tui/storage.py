@@ -121,13 +121,17 @@ class TaskStore:
                 salvaged += 1
                 continue
             known = {k: v for k, v in t.items() if k in Task.__dataclass_fields__}
-            if any(not known.get(f) for f in ("title", "description", "priority", "group")):
+            # setdefault só cobre chave ausente; campo presente porém vazio também
+            # quebra a UI (linha em branco), então normaliza os dois casos.
+            if not known.get("title"):
+                known["title"] = "(sem título — registro legado)"
                 salvaged += 1
+            if not known.get("description"):
+                known["description"] = ""
+            if not known.get("group"):
+                known["group"] = "general"
             known.setdefault("id", f"legacy-{i}")
-            known.setdefault("title", "(sem título — registro legado)")
-            known.setdefault("description", "")
             known.setdefault("priority", "medium")
-            known.setdefault("group", "general")
             known.setdefault("status", "todo")
             known.setdefault("created_at", known.get("updated_at") or now)
             known.setdefault("updated_at", now)
