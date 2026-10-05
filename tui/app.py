@@ -76,6 +76,12 @@ Header > HeaderTitle {
     color: #71717a;
 }
 
+#too-small {
+    content-align: center middle;
+    color: #f59e0b;
+    text-align: center;
+}
+
 /* ── Dashboard ── */
 .stats-grid {
     layout: grid;
@@ -83,6 +89,16 @@ Header > HeaderTitle {
     grid-gutter: 1;
     padding: 0 1 0 1;
     height: 7;
+}
+
+.stats-grid.layout-medium {
+    grid-size: 2;
+    height: 13;
+}
+
+.stats-grid.layout-narrow {
+    grid-size: 1;
+    height: 25;
 }
 
 .stat-card-total {
@@ -245,6 +261,44 @@ Button {
 """
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Layout responsivo — o TUI precisa caber em qualquer pane de tiling
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Abaixo de COLS_MIN não há espaço útil para tabela; mostra aviso em vez de layout
+# quebrado. Em tiling WM um pane estreito é comum mesmo num terminal grande.
+COLS_MIN = 34
+COLS_NARROW = 72
+COLS_MEDIUM = 100
+
+G_CHORD_TIMEOUT = 0.6
+
+# (column_key, label) — a ordem da lista é a ordem de visibilidade.
+TASK_COLUMNS: list[tuple[str, str]] = [
+    ("icon", ""),
+    ("value", "  $   "),
+    ("title", "Title"),
+    ("prio", "Prio"),
+    ("group", "Group"),
+]
+
+
+def layout_tier(width: int) -> str:
+    if width >= COLS_MEDIUM:
+        return "wide"
+    if width >= COLS_NARROW:
+        return "medium"
+    return "narrow"
+
+
+def visible_task_columns(tier: str) -> list[tuple[str, str]]:
+    if tier == "wide":
+        return TASK_COLUMNS
+    if tier == "medium":
+        return [c for c in TASK_COLUMNS if c[0] != "group"]
+    return [c for c in TASK_COLUMNS if c[0] in ("icon", "prio", "title")]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Shared helpers
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -255,7 +309,7 @@ def format_value(v: Optional[int]) -> Text:
         return Text(f"${v/1000:.1f}k".rjust(6), style="bold green")
     return Text(f"${v}".rjust(6), style="bold #10b981")
 
-def format_task_row(task) -> list[Text]:
+def format_task_row(task) -> dict[str, Text]:
     icon = STATUS_ICONS.get(task.status, "○")
     prio_color = PRIO_COLORS.get(task.priority, "white")
     status_color = {
@@ -263,13 +317,13 @@ def format_task_row(task) -> list[Text]:
     }.get(task.status, "grey62")
     title_style = "strike" if task.status == "done" else "none"
     title_color = "grey50" if task.status == "done" else "grey230"
-    return [
-        Text(icon, style=f"bold {status_color}"),
-        format_value(task.value),
-        Text(f" {task.title}", style=f"{title_style} {title_color}"),
-        Text(f" {task.priority}", style=f"bold {prio_color}"),
-        Text(f" #{task.group}", style="grey50"),
-    ]
+    return {
+        "icon": Text(icon, style=f"bold {status_color}"),
+        "value": format_value(task.value),
+        "title": Text(f" {task.title}", style=f"{title_style} {title_color}"),
+        "prio": Text(f" {task.priority}", style=f"bold {prio_color}"),
+        "group": Text(f" #{task.group}", style="grey50"),
+    }
 
 def format_time(iso: str) -> str:
     """Convert ISO timestamp to human relative time."""
@@ -291,6 +345,8 @@ class TaskScreen(Screen):
     BINDINGS = [
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
+        Binding("g", "nav_g", "Top", show=False),
+        Binding("G", "cursor_end", "End", show=False),
         Binding("a", "add_task", "Add", show=False),
         Binding("e", "edit_task", "Edit", show=False),
         Binding("d", "delete_task", "Delete", show=False),
@@ -308,6 +364,9 @@ class TaskScreen(Screen):
         self.store = store
         self.filter_priority: Optional[str] = None
         self.filter_search: str = ""
+        self._pending_g = False
+        self._tier = "wide"
+        self._cols_signature: tuple[tuple[str, int], ...] = ()
 
     @property
     def filtered_tasks(self):
@@ -322,20 +381,70 @@ class TaskScreen(Screen):
     def compose(self) -> ComposeResult:
         with Vertical(id="task-table"):
             yield DataTable()
+        yield Static("", id="too-small")
         yield Static("", id="status-line")
 
     def on_mount(self):
-        table = self.query_one(DataTable)
-        table.add_columns("", "  $   ", "Title", "Prio", "Group")
-        table.cursor_type = "row"
+        self._tier = layout_tier(self.size.width)
+        self._apply_tier()
+
+    def on_resize(self) -> None:
+        self._tier = layout_tier(self.size.width)
+        self._apply_tier()
+
+    def _column_plan(self) -> list[tuple[str, str, int]]:
+        """(key, label, content_width) garantindo que a soma caiba na tela.
+
+        O DataTable auto-ajusta a coluna Title à maior string e empurra as demais
+        para fora do terminal; sem largura explícita, Prio/Group somem. Cada coluna
+        renderiza com 2*cell_padding de padding, e #task-table tem margin 1 + border 1.
+        """
+        pad = 4
+        avail = max(10, self.size.width - 4)
+        tasks = self.filtered_tasks
+        chosen = visible_task_columns(self._tier)
+        natural = {
+            "icon": 1,
+            "value": 6,
+            "prio": 4,
+            "group": min(max((len(t.group) + 1 for t in tasks), default=1), 14),
+            "title": max((len(t.title) + 1 for t in tasks), default=1),
+        }
+        others = sum(natural[k] + pad for k, _ in chosen if k != "title")
+        title_w = max(1, min(natural["title"], avail - others - pad))
+        return [(k, label, natural[k] if k != "title" else title_w) for k, label in chosen]
+
+    def _apply_tier(self) -> None:
+        """Reconstroi colunas/aviso quando o tier de largura muda."""
+        too_small = self.size.width < COLS_MIN
+        self.query_one("#too-small", Static).display = too_small
+        self.query_one("#task-table").display = not too_small
+        if too_small:
+            self.query_one("#too-small", Static).update(
+                f"janela estreita demais\n{self.size.width}col < {COLS_MIN}\namplie o pane"
+            )
+            return
+        plan = self._column_plan()
+        signature = tuple((k, w) for k, _, w in plan)
+        if signature != self._cols_signature:
+            self._cols_signature = signature
+            table = self.query_one(DataTable)
+            table.clear(columns=True)
+            for key, label, width in plan:
+                table.add_column(label, width=width, key=key)
         self._refresh_table()
         self._update_status()
 
     def _refresh_table(self):
+        if self.size.width < COLS_MIN:
+            return
         table = self.query_one(DataTable)
+        table.cursor_type = "row"
+        keys = [k for k, _ in visible_task_columns(self._tier)]
         table.clear()
         for t in self.filtered_tasks:
-            table.add_row(*format_task_row(t))
+            cells = format_task_row(t)
+            table.add_row(*[cells[key] for key in keys])
         if self.filtered_tasks:
             table.move_cursor(row=0)
 
@@ -344,11 +453,12 @@ class TaskScreen(Screen):
         total = c["total"]
         shown = len(self.filtered_tasks)
         search_indicator = f' /🔍"{self.filter_search}"' if self.filter_search else ""
-        prio_indicator = f' prio:{self.filter_priority}' if self.filter_priority else ""
-        status = self.query_one("#status-line")
+        prio_indicator = f" prio:{self.filter_priority}" if self.filter_priority else ""
+        pending = " [g…]" if self._pending_g else ""
+        status = self.query_one("#status-line", Static)
         status.update(
-            f" tasks {shown}/{total}{search_indicator}{prio_indicator}"
-            f"  •  jk:nav a:add e:edit d:del /:search ?:help  "
+            f" tasks {shown}/{total}{search_indicator}{prio_indicator}{pending}"
+            f"  •  jk:nav gg/G:top-end a:add e:edit d:del /:search ?:help  "
             f"  •  ⚫{c['todo']} ◔{c['in_progress']} ●{c['done']} ⊘{c['paused']}"
         )
 
@@ -361,6 +471,28 @@ class TaskScreen(Screen):
     def action_cursor_up(self):
         table = self.query_one(DataTable)
         table.action_cursor_up()
+
+    def action_cursor_end(self):
+        rows = len(self.filtered_tasks)
+        if rows:
+            self.query_one(DataTable).move_cursor(row=rows - 1)
+
+    def action_nav_g(self):
+        """`gg` vai ao topo. O primeiro `g` fica pendente e expira sozinho."""
+        if self._pending_g:
+            self._pending_g = False
+            if self.filtered_tasks:
+                self.query_one(DataTable).move_cursor(row=0)
+            self._update_status()
+            return
+        self._pending_g = True
+        self._update_status()
+        self.set_timer(G_CHORD_TIMEOUT, self._expire_g)
+
+    def _expire_g(self):
+        if self._pending_g:
+            self._pending_g = False
+            self._update_status()
 
     def _selected_task(self):
         table = self.query_one(DataTable)
@@ -434,6 +566,26 @@ class DashboardScreen(Screen):
     def __init__(self, store: TaskStore):
         super().__init__()
         self.store = store
+        self._tier = "wide"
+
+    def on_mount(self):
+        self._tier = layout_tier(self.size.width)
+        self._apply_tier()
+
+    def on_resize(self) -> None:
+        tier = layout_tier(self.size.width)
+        if tier != self._tier:
+            self._tier = tier
+            self._apply_tier()
+
+    def _apply_tier(self) -> None:
+        grid = self.query_one(".stats-grid")
+        grid.remove_class("layout-medium")
+        grid.remove_class("layout-narrow")
+        if self._tier == "medium":
+            grid.add_class("layout-medium")
+        elif self._tier == "narrow":
+            grid.add_class("layout-narrow")
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes="stats-grid"):
@@ -814,6 +966,8 @@ class HelpScreen(ModalScreen):
                 yield Static("KEYBINDINGS", classes="modal-title")
                 keys = [
                     ("j / k", "Navigate up / down"),
+                    ("g g", "Jump to top"),
+                    ("G", "Jump to bottom"),
                     ("a", "Add new task"),
                     ("e", "Edit selected task"),
                     ("d", "Delete selected task"),
