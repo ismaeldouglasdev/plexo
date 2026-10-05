@@ -140,6 +140,10 @@ Header > HeaderTitle {
     text-align: center;
 }
 
+#dash-scroll {
+    height: 1fr;
+}
+
 .dash-section {
     border: round #27272a;
     margin: 0 1 1 1;
@@ -353,6 +357,71 @@ class PlexoScreen(Screen):
         return cast("PlexoApp", self.app)
 
 
+SCROLL_BINDINGS = [
+    Binding("j", "scroll_down", "Down", show=False),
+    Binding("k", "scroll_up", "Up", show=False),
+    Binding("down", "scroll_down", "Down", show=False),
+    Binding("up", "scroll_up", "Up", show=False),
+    Binding("page_down", "scroll_page_down", "PageDown", show=False),
+    Binding("page_up", "scroll_page_up", "PageUp", show=False),
+    Binding("ctrl+d", "scroll_page_down", "HalfDown", show=False),
+    Binding("ctrl+u", "scroll_page_up", "HalfUp", show=False),
+    Binding("g", "nav_g", "Top", show=False),
+    Binding("G", "scroll_end", "End", show=False),
+    Binding("home", "scroll_home", "Home", show=False),
+    Binding("end", "scroll_end", "End", show=False),
+    Binding("?", "show_help", "Help", show=False),
+]
+
+
+class ScrollScreen(PlexoScreen):
+    """Telas com conteudo maior que a viewport: scroll por teclado + gg.
+
+    O Dashboard nao tinha container scrollavel nenhum, entao numa janela baixa a
+    secao RECENT ACTIVITY ficava inalcancavel -- nem com o mouse. Logs tinha
+    RichLog scrollavel mas nenhuma tecla. Ambas usam este mixin.
+    """
+
+    BINDINGS = SCROLL_BINDINGS
+    _pending_g = False
+
+    @property
+    def _scrollable(self):
+        raise NotImplementedError
+
+    def action_scroll_up(self) -> None:
+        self._scrollable.scroll_up(animate=False)
+
+    def action_scroll_down(self) -> None:
+        self._scrollable.scroll_down(animate=False)
+
+    def action_scroll_page_up(self) -> None:
+        self._scrollable.scroll_page_up(animate=False)
+
+    def action_scroll_page_down(self) -> None:
+        self._scrollable.scroll_page_down(animate=False)
+
+    def action_scroll_home(self) -> None:
+        self._scrollable.scroll_home(animate=False)
+
+    def action_scroll_end(self) -> None:
+        self._scrollable.scroll_end(animate=False)
+
+    def action_nav_g(self) -> None:
+        if self._pending_g:
+            self._pending_g = False
+            self.action_scroll_home()
+            return
+        self._pending_g = True
+        self.set_timer(G_CHORD_TIMEOUT, self._expire_g)
+
+    def _expire_g(self) -> None:
+        self._pending_g = False
+
+    def action_show_help(self) -> None:
+        self.app.push_screen(HelpScreen())
+
+
 class TaskScreen(PlexoScreen):
     BINDINGS = [
         Binding("j", "cursor_down", "Down", show=False),
@@ -563,7 +632,7 @@ class TaskScreen(PlexoScreen):
 # Dashboard Screen
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class DashboardScreen(PlexoScreen):
+class DashboardScreen(ScrollScreen):
     BINDINGS = [
         Binding("1", "switch_tasks", "Tasks", show=False),
         Binding("2", "switch_dashboard", "Dash", show=False),
@@ -571,6 +640,10 @@ class DashboardScreen(PlexoScreen):
         Binding("q", "quit", "Quit", show=False),
         Binding("/", "focus_search", "Search", show=False),
     ]
+
+    @property
+    def _scrollable(self) -> ScrollableContainer:
+        return self.query_one("#dash-scroll", ScrollableContainer)
 
     def __init__(self, store: TaskStore):
         super().__init__()
@@ -597,6 +670,10 @@ class DashboardScreen(PlexoScreen):
             grid.add_class("layout-narrow")
 
     def compose(self) -> ComposeResult:
+        with ScrollableContainer(id="dash-scroll"):
+            yield from self._compose_sections()
+
+    def _compose_sections(self) -> ComposeResult:
         with Horizontal(classes="stats-grid"):
             for label, key, card_class, color in [
                 ("Total", "total", "stat-card-total", "#e4e4e7"),
@@ -737,7 +814,7 @@ def _render_recent(store) -> str:
 # Log Viewer Screen
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class LogScreen(PlexoScreen):
+class LogScreen(ScrollScreen):
     BINDINGS = [
         Binding("1", "switch_tasks", "Tasks", show=False),
         Binding("2", "switch_dashboard", "Dash", show=False),
@@ -747,6 +824,10 @@ class LogScreen(PlexoScreen):
         Binding("d", "clear_logs", "Clear", show=False),
         Binding("c", "clear_logs", "Clear", show=False),
     ]
+
+    @property
+    def _scrollable(self) -> RichLog:
+        return self.query_one("#log-view", RichLog)
 
     def __init__(self, store: TaskStore):
         super().__init__()
