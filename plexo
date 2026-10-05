@@ -3,11 +3,152 @@ set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV="$APP_DIR/tui/venv"
+PLEXO_DIR="$HOME/.plexo"
+CONTEXTS_DIR="$PLEXO_DIR/contexts"
+PLEXO_API="http://localhost:8082"
 
-if [ ! -d "$VENV" ]; then
+# ── subcommands ──────────────────────────────────────────────────────────
+
+cmd_context() {
+  local action="${1:-}"; shift || true
+  case "$action" in
+    open)
+      local id="${1:-}"
+      [ -z "$id" ] && { echo "Uso: plexo context open <id>"; exit 1; }
+      local file="$CONTEXTS_DIR/$id.md"
+      if [ ! -f "$file" ]; then
+        echo "❌ Contexto não existe para task #$id"
+        echo "   Crie com: plexo context init $id"
+        exit 1
+      fi
+      ${EDITOR:-vim} "$file"
+      # Auto-save via API after editing
+      local content
+      content=$(cat "$file")
+      curl -s -X POST "$PLEXO_API/api/tasks/$id/context" \
+        -H 'Content-Type: application/json' \
+        -d "{\"content\":$(echo "$content" | python3 -c 'import sys,json;print(json.dumps(sys.stdin.read()))')}" > /dev/null
+      echo "✅ Contexto salvo via API"
+      ;;
+    show)
+      local id="${1:-}"
+      [ -z "$id" ] && { echo "Uso: plexo context show <id>"; exit 1; }
+      local file="$CONTEXTS_DIR/$id.md"
+      if [ ! -f "$file" ]; then
+        echo "❌ Contexto não existe para task #$id"
+        exit 1
+      fi
+      ${PAGER:-cat} "$file"
+      ;;
+    init)
+      local id="${1:-}"
+      [ -z "$id" ] && { echo "Uso: plexo context init <id>"; exit 1; }
+      local file="$CONTEXTS_DIR/$id.md"
+      [ -f "$file" ] && { echo "⚠️  Contexto já existe: $file"; exit 1; }
+      mkdir -p "$CONTEXTS_DIR"
+      # Fetch task info from API
+      local task_json
+      task_json=$(curl -s "$PLEXO_API/api/tasks" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for t in data.get('tasks', []):
+    if t.get('id') == '$id':
+        print(json.dumps(t, indent=2))
+        break
+" 2>/dev/null || echo "{}")
+      local title desc
+      title=$(echo "$task_json" | python3 -c "import sys,json;print(json.load(sys.stdin).get('title','Task #$id'))" 2>/dev/null || echo "Task #$id")
+      desc=$(echo "$task_json" | python3 -c "import sys,json;print(json.load(sys.stdin).get('description',''))" 2>/dev/null || echo "")
+      cat > "$file" << CONTEXTEOF
+---
+task_id: "$id"
+title: "$title"
+status: pending
+group: ""
+priority: medium
+created: $(date -I)
+---
+
+## Contexto
+
+$desc
+
+## Stack
+
+-
+
+## O Que Já Existe
+
+-
+
+## O Que Precisa Ser Feito
+
+-
+
+## Arquivos Relevantes
+
+| Caminho | Descrição |
+|---------|-----------|
+| - | - |
+
+## Blockers / Notas
+
+-
+
+## Sessões Anteriores
+
+-
+
+## Próximo Passo Recomendado
+
+1.
+CONTEXTEOF
+      echo "✅ Contexto criado: $file"
+      echo "   Edite com: plexo context open $id"
+      ;;
+    *)
+      echo "Uso: plexo context {open|show|init} <id>"
+      echo ""
+      echo "  open <id>   — Editar contexto da task (abre \$EDITOR)"
+      echo "  show <id>   — Exibir contexto"
+      echo "  init <id>   — Criar contexto a partir dos dados da task"
+      ;;
+  esac
+}
+
+# ── main ─────────────────────────────────────────────────────────────────
+
+if [ $# -eq 0 ]; then
+  # Default: launch TUI
+  if [ ! -d "$VENV" ]; then
     echo "→ Setting up virtualenv ..."
     python3 -m venv "$VENV"
     "$VENV/bin/pip" install -q textual 2>/dev/null
+  fi
+  exec "$VENV/bin/python" -m tui -- "$@"
 fi
 
-exec "$VENV/bin/python" -m tui -- "$@"
+subcmd="$1"; shift
+case "$subcmd" in
+  context)
+    cmd_context "$@"
+    ;;
+  help|--help|-h)
+    echo "plexo — Gerenciador de Tasks"
+    echo ""
+    echo "Uso:"
+    echo "  plexo                    → Abrir TUI"
+    echo "  plexo context open <id>  → Editar contexto"
+    echo "  plexo context show <id>  → Ver contexto"
+    echo "  plexo context init <id>  → Criar contexto"
+    ;;
+  *)
+    # Fallback: pass to TUI
+    if [ ! -d "$VENV" ]; then
+      echo "→ Setting up virtualenv ..."
+      python3 -m venv "$VENV"
+      "$VENV/bin/pip" install -q textual 2>/dev/null
+    fi
+    exec "$VENV/bin/python" -m tui -- "$subcmd" "$@"
+    ;;
+esac
