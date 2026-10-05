@@ -7,6 +7,7 @@ import json
 import os
 import time
 from dataclasses import dataclass, field, asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -87,8 +88,10 @@ class TaskStore:
     def __init__(self, log_callback=None, use_mock=False):
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         self.log_callback = log_callback
-        self.tasks = self._load(use_mock)
+        # logs ANTES de tasks: _load/_coerce podem chamar _write_log em caso de
+        # dados corrompidos, e _write_log depende de self.logs existir.
         self.logs = self._load_logs()
+        self.tasks = self._load(use_mock)
         self._write_log("info", "APP_INIT", f"Store initialized with {len(self.tasks)} tasks")
 
     def _load(self, use_mock=False) -> list[Task]:
@@ -97,10 +100,54 @@ class TaskStore:
         if TASKS_FILE.exists():
             try:
                 raw = json.loads(TASKS_FILE.read_text())
-                return [Task(**{k: v for k, v in t.items() if k in Task.__dataclass_fields__}) for t in raw]
-            except (json.JSONDecodeError, KeyError) as e:
-                self._write_log("error", "SYSTEM_ERROR", f"Corrupted tasks.json: {e}")
+            except (json.JSONDecodeError, OSError) as e:
+                self._write_log("error", "SYSTEM_ERROR", f"tasks.json ilegível: {e}")
+                return [Task(**t) for t in SEED_TASKS]
+            return self._coerce(raw)
         return [Task(**t) for t in SEED_TASKS]
+
+    def _coerce(self, raw) -> list[Task]:
+        """Normaliza registros em Task; um record ruim não derruba o arquivo inteiro.
+
+        Tolera campos ausentes/inválidos de propósito: tasks.json é estado de usuário
+        editado por vários caminhos (server.py, TUI, scripts antigos) e já teve
+        record com schema de versão antiga (bug 2026-10-03).
+        """
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        tasks: list[Task] = []
+        salvaged = 0
+        for i, t in enumerate(raw):
+            if not isinstance(t, dict):
+                salvaged += 1
+                continue
+            known = {k: v for k, v in t.items() if k in Task.__dataclass_fields__}
+            if any(not known.get(f) for f in ("title", "description", "priority", "group")):
+                salvaged += 1
+            known.setdefault("id", f"legacy-{i}")
+            known.setdefault("title", "(sem título — registro legado)")
+            known.setdefault("description", "")
+            known.setdefault("priority", "medium")
+            known.setdefault("group", "general")
+            known.setdefault("status", "todo")
+            known.setdefault("created_at", known.get("updated_at") or now)
+            known.setdefault("updated_at", now)
+            if known.get("status") not in STATUS_CYCLE:
+                known["status"] = "todo"
+            if known.get("priority") not in PRIO_COLORS:
+                known["priority"] = "medium"
+            try:
+                tasks.append(Task(**known))
+            except TypeError as e:
+                salvaged += 1
+                self._write_log(
+                    "error", "SYSTEM_ERROR", f"registro {known.get('id')} descartado: {e}"
+                )
+        if salvaged:
+            self._write_log(
+                "warn", "SYSTEM_ERROR",
+                f"{salvaged} registro(s) com schema divergente reparado(s) ao carregar",
+            )
+        return tasks
 
     def _save(self):
         TASKS_FILE.write_text(json.dumps([asdict(t) for t in self.tasks], indent=2))
