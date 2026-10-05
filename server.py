@@ -92,8 +92,8 @@ def _write_json(path: Path, data):
 class PlexoHandler(BaseHTTPRequestHandler):
     """HTTP handler that serves static files and REST API endpoints."""
 
-    def log_message(self, fmt, *args):
-        print(f"[plexo] {args[0] if args else fmt}", file=sys.stderr)
+    def log_message(self, format, *args):  # noqa: A002 - nome herdado de BaseHTTPRequestHandler
+        print(f"[plexo] {args[0] if args else format}", file=sys.stderr)
 
     # ── helpers ──────────────────────────────────────────────────────────
 

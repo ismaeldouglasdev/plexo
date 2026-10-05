@@ -1,0 +1,18 @@
+{
+  "include": ["server.py", "tui"],
+  "exclude": ["node_modules", "dist", "tui/venv", "**/__pycache__"],
+  "typeCheckingMode": "standard",
+  "pythonVersion": "3.12",
+  "reportMissingTypeStubs": false,
+  "reportUnusedCallResult": "none",
+  "reportImplicitOverride": "none",
+  "reportUnannotatedClassAttribute": "none",
+  "reportPrivateUsage": "none",
+  "reportUnknownMemberType": "none",
+  "reportUnknownParameterType": "none",
+  "reportMissingParameterType": "none",
+  "reportUnusedParameter": "none",
+  "reportUnknownVariableType": "none",
+  "reportMissingTypeArgument": "none",
+  "reportRedeclaration": "none"
+}

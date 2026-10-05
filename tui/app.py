@@ -4,7 +4,7 @@ plexo — TUI task manager with vim keys, dashboard, and activity logs.
 from __future__ import annotations
 
 import time
-from typing import Optional
+from typing import Optional, cast
 
 from textual import work
 from textual.app import App, ComposeResult
@@ -341,7 +341,19 @@ def format_time(iso: str) -> str:
 # Task List Screen
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class TaskScreen(Screen):
+class PlexoScreen(Screen):
+    """Base das telas que navegam pelas acoes switch_to_* do PlexoApp.
+
+    Screen.app e tipado como App, que nao conhece os switch_to_*, entao o acesso
+    direto-self.plexo.switch_to_tasks() erra no type checker mesmo funcionando em runtime.
+    """
+
+    @property
+    def plexo(self) -> PlexoApp:
+        return cast("PlexoApp", self.app)
+
+
+class TaskScreen(PlexoScreen):
     BINDINGS = [
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
@@ -536,16 +548,13 @@ class TaskScreen(Screen):
         self._update_status()
 
     def action_switch_tasks(self):
-        self.app.switch_to_tasks()
+        self.plexo.switch_to_tasks()
 
     def action_switch_dashboard(self):
-        self.app.switch_to_dashboard()
+        self.plexo.switch_to_dashboard()
 
     def action_switch_logs(self):
-        self.app.switch_to_logs()
-
-    def action_quit(self):
-        self.app.exit()
+        self.plexo.switch_to_logs()
 
     def action_show_help(self):
         self.app.push_screen(HelpScreen())
@@ -554,7 +563,7 @@ class TaskScreen(Screen):
 # Dashboard Screen
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class DashboardScreen(Screen):
+class DashboardScreen(PlexoScreen):
     BINDINGS = [
         Binding("1", "switch_tasks", "Tasks", show=False),
         Binding("2", "switch_dashboard", "Dash", show=False),
@@ -616,19 +625,16 @@ class DashboardScreen(Screen):
             yield Static(_render_recent(self.store), markup=True)
 
     def action_switch_tasks(self):
-        self.app.switch_to_tasks()
+        self.plexo.switch_to_tasks()
 
     def action_switch_dashboard(self):
         pass  # already here
 
     def action_switch_logs(self):
-        self.app.switch_to_logs()
-
-    def action_quit(self):
-        self.app.exit()
+        self.plexo.switch_to_logs()
 
     def action_focus_search(self):
-        self.app.switch_to_tasks()
+        self.plexo.switch_to_tasks()
 
 # ─── Dashboard sub-widgets ────────────────────────────────────────────────────
 
@@ -731,7 +737,7 @@ def _render_recent(store) -> str:
 # Log Viewer Screen
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class LogScreen(Screen):
+class LogScreen(PlexoScreen):
     BINDINGS = [
         Binding("1", "switch_tasks", "Tasks", show=False),
         Binding("2", "switch_dashboard", "Dash", show=False),
@@ -762,16 +768,13 @@ class LogScreen(Screen):
             log_widget.write(text)
 
     def action_switch_tasks(self):
-        self.app.switch_to_tasks()
+        self.plexo.switch_to_tasks()
 
     def action_switch_dashboard(self):
-        self.app.switch_to_dashboard()
+        self.plexo.switch_to_dashboard()
 
     def action_switch_logs(self):
         pass  # already here
-
-    def action_quit(self):
-        self.app.exit()
 
     def action_clear_logs(self):
         self.store.logs.clear()
@@ -806,8 +809,8 @@ class FindScreen(ModalScreen):
         self._update_count()
 
     def _update_count(self):
-        label = self.query_one("#search-results")
-        q = self.query_one("#search-input").value
+        label = self.query_one("#search-results", Static)
+        q = self.query_one("#search-input", Input).value
         prio = getattr(self, "_prio_filter", None)
         tasks = self.store.tasks
         if q:
@@ -822,11 +825,11 @@ class FindScreen(ModalScreen):
 
     def on_button_pressed(self, event: Button.Pressed):
         id_map = {"btn-all": None, "btn-high": "high", "btn-med": "medium", "btn-low": "low"}
-        self._prio_filter = id_map.get(event.button.id)
+        self._prio_filter = id_map.get(event.button.id or "")
         self._update_count()
 
     def key_enter(self):
-        q = self.query_one("#search-input").value
+        q = self.query_one("#search-input", Input).value
         prio = getattr(self, "_prio_filter", None)
         self.task_screen.filter_search = q
         self.task_screen.filter_priority = prio
@@ -884,15 +887,15 @@ class TaskForm(ModalScreen):
         self.dismiss()
 
     def _save(self):
-        title = self.query_one("#form-title").value.strip()
+        title = self.query_one("#form-title", Input).value.strip()
         if not title:
             return
-        desc = self.query_one("#form-desc").text.strip()
-        group = self.query_one("#form-group").value.strip()
-        prio = self.query_one("#form-priority").value.strip().lower()
+        desc = self.query_one("#form-desc", TextArea).text.strip()
+        group = self.query_one("#form-group", Input).value.strip()
+        prio = self.query_one("#form-priority", Input).value.strip().lower()
         if prio not in ("high", "medium", "low"):
             prio = "medium"
-        val_raw = self.query_one("#form-value").value.strip()
+        val_raw = self.query_one("#form-value", Input).value.strip()
         value: Optional[int] = None
         if val_raw:
             try:
@@ -1049,9 +1052,6 @@ class PlexoApp(App):
         idx = order.index(self._current_view)
         next_idx = (idx + 1) % len(order)
         self._switch_view(order[next_idx])
-
-    def action_quit(self):
-        self.exit()
 
 
 def main():
