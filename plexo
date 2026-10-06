@@ -9,12 +9,21 @@ PLEXO_API="http://localhost:8082"
 
 # ── subcommands ──────────────────────────────────────────────────────────
 
+# Fix cc78b48 (bugs 1 e 2): id so com [A-Za-z0-9_-] — nunca vai cru para
+# o filesystem nem para python3 -c. Rejeita injeçao e path traversal.
+validar_id() {
+  case "$1" in
+    *[!A-Za-z0-9_-]*) echo "❌ id inválido: $1"; exit 1 ;;
+  esac
+}
+
 cmd_context() {
   local action="${1:-}"; shift || true
   case "$action" in
     open)
       local id="${1:-}"
       [ -z "$id" ] && { echo "Uso: plexo context open <id>"; exit 1; }
+      validar_id "$id"
       local file="$CONTEXTS_DIR/$id.md"
       if [ ! -f "$file" ]; then
         echo "❌ Contexto não existe para task #$id"
@@ -33,6 +42,7 @@ cmd_context() {
     show)
       local id="${1:-}"
       [ -z "$id" ] && { echo "Uso: plexo context show <id>"; exit 1; }
+      validar_id "$id"
       local file="$CONTEXTS_DIR/$id.md"
       if [ ! -f "$file" ]; then
         echo "❌ Contexto não existe para task #$id"
@@ -43,6 +53,7 @@ cmd_context() {
     init)
       local id="${1:-}"
       [ -z "$id" ] && { echo "Uso: plexo context init <id>"; exit 1; }
+      validar_id "$id"
       local file="$CONTEXTS_DIR/$id.md"
       [ -f "$file" ] && { echo "⚠️  Contexto já existe: $file"; exit 1; }
       mkdir -p "$CONTEXTS_DIR"
@@ -56,6 +67,12 @@ for t in data.get('tasks', []):
         print(json.dumps(t, indent=2))
         break
 " 2>/dev/null || echo "{}")
+      # Fix cc78b48 (bug 4): init exige task existente — recusa orfao se a
+      # API nao confirmar o id (servidor fora do ar ou id inexistente).
+      if [ -z "$task_json" ] || [ "$task_json" = "{}" ]; then
+        echo "❌ Task #$id não encontrada (servidor $PLEXO_API inacessível ou id inexistente)"
+        exit 1
+      fi
       local title desc
       title=$(echo "$task_json" | python3 -c "import sys,json;print(json.load(sys.stdin).get('title','Task #$id'))" 2>/dev/null || echo "Task #$id")
       desc=$(echo "$task_json" | python3 -c "import sys,json;print(json.load(sys.stdin).get('description',''))" 2>/dev/null || echo "")
