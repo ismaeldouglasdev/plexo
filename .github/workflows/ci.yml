@@ -13,9 +13,14 @@ jobs:
   python:
     runs-on: ubuntu-24.04
     strategy:
+      # fail-fast:false evita abortar as legs irmas quando uma falha de verdade.
+      # Nao evita leg cancelled: no free tier o runner 3.12 ja ficou 11min em
+      # queued e voltou cancelled, deixando o CI vermelho sem nenhum teste
+      # quebrado. Se isso repetir, baixe a matrix para so 3.14 em vez de
+      # ficar caçando flaky.
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.14"]
+        python-version: ["3.14", "3.12"]
 
     steps:
       - uses: actions/checkout@v4
