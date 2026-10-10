@@ -6,18 +6,23 @@ import os
 import sys
 import mimetypes
 import socket
+import threading
 import time
 from http import HTTPStatus
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse
 from datetime import datetime, timezone
 
 HOME = os.path.expanduser("~")
-TASKS_PATH = Path(f"{HOME}/.plexo/tasks.json")
-LOGS_PATH = Path(f"{HOME}/.plexo/logs.json")
-CONTEXTS_DIR = Path(f"{HOME}/.plexo/contexts")
+DATA_DIR = Path(os.environ.get("PLEXO_DATA_DIR", f"{HOME}/.plexo"))
+TASKS_PATH = DATA_DIR / "tasks.json"
+LOGS_PATH = DATA_DIR / "logs.json"
+CONTEXTS_DIR = DATA_DIR / "contexts"
 STATIC_DIR = Path(__file__).resolve().parent / "dist"
+
+# Serialize read-modify-write cycles so concurrent POSTs cannot lose an update.
+_LOCK = threading.Lock()
 
 MOCK_TASKS = [
     {"id": "m1", "title": "Homepage redesign", "description": "New hero section, value props, and CTA layout.", "priority": "high", "status": "in_progress", "group": "frontend", "value": 800, "created_at": "2026-07-01T00:00:00Z", "updated_at": "2026-07-02T00:00:00Z"},
@@ -178,21 +183,22 @@ class PlexoHandler(BaseHTTPRequestHandler):
 
     def _dispatch_post(self):
         path = self._parse_path()
-        if path == "/api/tasks":
-            return self._set_tasks()
-        elif path == "/api/tasks/add":
-            return self._add_task()
-        elif path == "/api/tasks/update-status":
-            return self._update_task_status()
-        elif path == "/api/tasks/delete":
-            return self._delete_task()
-        elif path.startswith("/api/tasks/") and path.endswith("/context"):
-            task_id = path.split("/")[3]
-            return self._set_task_context(task_id)
-        elif path == "/api/logs":
-            return self._add_log()
-        else:
-            self._send_error(404, "Not found")
+        with _LOCK:
+            if path == "/api/tasks":
+                return self._set_tasks()
+            elif path == "/api/tasks/add":
+                return self._add_task()
+            elif path == "/api/tasks/update-status":
+                return self._update_task_status()
+            elif path == "/api/tasks/delete":
+                return self._delete_task()
+            elif path.startswith("/api/tasks/") and path.endswith("/context"):
+                task_id = path.split("/")[3]
+                return self._set_task_context(task_id)
+            elif path == "/api/logs":
+                return self._add_log()
+            else:
+                self._send_error(404, "Not found")
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -490,8 +496,8 @@ def main():
         if not LOGS_PATH.exists():
             _write_json(LOGS_PATH, [])
 
-    bind = os.environ.get("PLEXO_BIND", "127.0.0.1")
-    server = HTTPServer((bind, port), PlexoHandler)
+    bind = os.environ.get("PLEXO_BIND") or os.environ.get("PLEXO_HOST") or "127.0.0.1"
+    server = ThreadingHTTPServer((bind, port), PlexoHandler)
     server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     addr = "localhost" if bind in ("127.0.0.1", "localhost") else bind
     print(f"🚀 plexo API + UI at http://{bind}:{port}")
